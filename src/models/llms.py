@@ -35,7 +35,7 @@ class LLMs(nn.Module):
 
         self.model = model
 
-    def forward_masked(self, data):
+    def forward_pass(self, data):
         """
         Calculate prediction loss given post-processed retrival contents.
         """

@@ -69,7 +69,6 @@ class SAGE(nn.Module):
 
         # num_edges = edge_index.shape[1]
         # h_q = h_q.expand(num_edges, -1)
-        # TODO: add reverse for performance gain. You may also delete it.
         h_r_reverse = self.proj_reverse(h_r)
         h_r = torch.cat([h_r, h_r_reverse], dim=0)
         edge_index = torch.cat([edge_index, reverse_edge_index], dim=1)

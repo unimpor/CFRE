@@ -40,39 +40,53 @@ class CFRE(nn.Module):
         attn__loss, loss_dict = self.__loss__()  # calculate attn-related loss
 
         # 3. generate filtered retrieval results
-
+        masked_triple_token_id = self.mask_triplet(triplets, attn_bern)
 
         # 4. LLM supervisions
-        outputs = self.llms.forward_masked()
+        outputs = self.llms.forward_pass()
         loss = attn__loss + outputs.loss
         loss_dict["predict"] = outputs.loss.item()
         return loss, loss_dict
 
-    def mask_triplet(self, tokenized_triplet, attn):
+    def mask_triplet(self, triplets, attn):
+        """
+        Mask tokenized triplets using attn
+        """
         # Example: triplets converted into strings
 
+        # Load the tokenizer
+        def triplet_to_str(triplet):
+            return f"({triplet[0]},{triplet[1]},{triplet[2]})"
+        # Tokenize each triplet string
+        tokenized_triplets = [self.llms.tokenizer(triplet_to_str(triplet), return_tensors="pt")
+                              for triplet in triplets]
 
-        # Mask from Gumbel-Softmax (N-dimensional)
-        m = torch.tensor([0.8, 0.1, 0.9], requires_grad=True)  # Example mask from Gumbel-Softmax
+        # Get the lengths of the tokenized triplets (number of tokens in each triplet)
+        triplet_lengths = [len(tokenized_triplet["input_ids"].squeeze()) for tokenized_triplet in tokenized_triplets]
 
-        # Create the full mask via broadcasting instead of repeat
-        expanded_masks = torch.cat([m[i].expand(triplet_lengths[i]) for i in range(len(m))])
+        masks = torch.cat([attn[i].expand(triplet_lengths[i]) for i in range(len(attn))])
 
-        # Concatenate triplet strings into a single sequence (you can tokenize or vectorize these)
-        T = "".join(triplet_strings)  # Concatenated triplet strings as a single sequence
+        # Concatenate all tokenized triplets into a single tensor sequence
+        concatenated_token_ids = torch.cat(
+            [tokenized_triplet["input_ids"].squeeze() for tokenized_triplet in tokenized_triplets])
 
-        # Placeholder string for masked-out triplets
-        mu = "[MASK]" * max(triplet_lengths)  # Placeholder string matching the longest triplet
+        mu = self.llms.tokenizer.encode("\n", add_special_tokens=False)[0]  # Using the [MASK] token's ID
 
+        # Create a placeholder tensor with the same length as concatenated token IDs, filled with the [MASK] token ID
+        placeholder_tensor = torch.full_like(concatenated_token_ids, mu)
         # Apply the mask (element-wise multiplication)
-        # Use a tensor representation of the concatenated triplet strings for element-wise ops
-        # Assuming triplet strings are converted to tensors (e.g., embeddings or token IDs)
-        masked_triplet_text = expanded_masks * torch.tensor(list(T), dtype=torch.float32) \
-                              + (1 - expanded_masks) * torch.tensor(list(mu), dtype=torch.float32)
+        masked_token_ids = masks * concatenated_token_ids + (1 - masks) * placeholder_tensor
+        return masked_token_ids
 
-        # Example backward pass (just for checking gradient flow)
-        loss = masked_triplet_text.sum()  # Dummy loss for gradient check
-        loss.backward()
+    def print_trainable_params(self):
+        trainable_params = 0
+        all_param = 0
 
-        # Check gradients for mask values
-        print(m.grad)  # Should not be None, confirming gradient flow
+        for _, param in self.named_parameters():
+            num_params = param.numel()
+
+            all_param += num_params
+            if param.requires_grad:
+                trainable_params += num_params
+
+        return trainable_params, all_param

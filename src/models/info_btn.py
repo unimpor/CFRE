@@ -71,7 +71,7 @@ class FineGrainedRetriever(nn.Module):
             ], dim=0)
         # Potentially memory-wise problematic
         h_r = relation_embs[r_id_tensor]
-        # TODO: add reverse for performance gain. You may also delete it.
+        # add reverse for performance gain
         reverse_edge_index = torch.stack([
             t_id_tensor,
             h_id_tensor
