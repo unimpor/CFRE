@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from src.utils import (INSTRUCTION, PLACEHOLDER, QUESTION, RETRIEVAL_CONTEXT)
 
 
 class CFRE(nn.Module):
@@ -40,7 +41,7 @@ class CFRE(nn.Module):
         attn__loss, loss_dict = self.__loss__()  # calculate attn-related loss
 
         # 3. generate filtered retrieval results
-        masked_triple_token_id = self.mask_triplet(triplets, attn_bern)
+        masked_triple_token_ids = self.mask_triplet(triplets, attn_bern)
 
         # 4. LLM supervisions
         outputs = self.llms.forward_pass()
@@ -70,13 +71,15 @@ class CFRE(nn.Module):
         concatenated_token_ids = torch.cat(
             [tokenized_triplet["input_ids"].squeeze() for tokenized_triplet in tokenized_triplets])
 
-        mu = self.llms.tokenizer.encode("\n", add_special_tokens=False)[0]  # Using the [MASK] token's ID
+        mu = self.llms.tokenizer.encode(PLACEHOLDER, add_special_tokens=False)[0]  # Using the [MASK] token's ID
 
         # Create a placeholder tensor with the same length as concatenated token IDs, filled with the [MASK] token ID
         placeholder_tensor = torch.full_like(concatenated_token_ids, mu)
         # Apply the mask (element-wise multiplication)
         masked_token_ids = masks * concatenated_token_ids + (1 - masks) * placeholder_tensor
         return masked_token_ids
+
+
 
     def print_trainable_params(self):
         trainable_params = 0

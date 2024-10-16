@@ -1,6 +1,6 @@
 import argparse
 
-from get_model import CFRE
+from cfre import CFRE
 from src.models import LLMs, FineGrainedRetriever
 
 
@@ -23,8 +23,6 @@ def main():
     cfre = CFRE()
 
     # Set Optimizer. Optimizer TBD
-
-
 
 
 if __name__ == '__main__':

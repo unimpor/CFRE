@@ -47,4 +47,14 @@ class LLMs(nn.Module):
         )
         return outputs.loss
 
+    def inference(self, samples):
+        pass
 
+    def __loss__(self):
+        pass
+
+    def prepare_textual_input(self):
+        """
+        prepare textual input (token ids) for LLM.
+        Devided into three parts: system prompt, query, retrieval results.
+        """
