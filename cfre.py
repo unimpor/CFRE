@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from src.utils import (INSTRUCTION, PLACEHOLDER, QUESTION, RETRIEVAL_CONTEXT)
+from src.utils import PLACEHOLDER
 
 
 class CFRE(nn.Module):
@@ -34,17 +34,17 @@ class CFRE(nn.Module):
         return info_loss + con_loss + dir_loss, {"info": info_loss.item(), "con": con_loss.item(), "dir": dir_loss.item()}
 
     def forward_pass(self, data):
-        # 1. post-extract data items
+        # 1. post-extract batch-data items
 
         # 2. generate mask for the coarsely retrieved samples.
         attn_bern = self.ibtn()
         attn__loss, loss_dict = self.__loss__()  # calculate attn-related loss
 
         # 3. generate filtered retrieval results
-        masked_triple_token_ids = self.mask_triplet(triplets, attn_bern)
+        batch_masked_triple_token_ids = [self.mask_triplet(triplets, attn_bern) for (triplets, attn_bern) in zip()]
 
         # 4. LLM supervisions
-        outputs = self.llms.forward_pass()
+        outputs = self.llms.forward_pass(batch_masked_triple_token_ids)
         loss = attn__loss + outputs.loss
         loss_dict["predict"] = outputs.loss.item()
         return loss, loss_dict
@@ -78,8 +78,6 @@ class CFRE(nn.Module):
         # Apply the mask (element-wise multiplication)
         masked_token_ids = masks * concatenated_token_ids + (1 - masks) * placeholder_tensor
         return masked_token_ids
-
-
 
     def print_trainable_params(self):
         trainable_params = 0
