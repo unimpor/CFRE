@@ -99,12 +99,13 @@ class FineGrainedRetriever(nn.Module):
         ], dim=1)
         # attention logits for each triplet.
         attn_logtis = self.pred(h_triple)
-
+        # TODO: consider different modelling strategy of subgraph extraction
+        # TODO: 1) independent Bernoulli 2) sampling from categorical
         return self.concrete_sample(attn_logtis, )
 
     @staticmethod
     def concrete_sample(att_log_logit, temp=1, training=True):
-        if training:  # Gumbel-Softmax
+        if training:
             random_noise = torch.empty_like(att_log_logit).uniform_(1e-10, 1 - 1e-10)
             random_noise = torch.log(random_noise) - torch.log(1.0 - random_noise)
             att_bern = ((att_log_logit + random_noise) / temp).sigmoid()
