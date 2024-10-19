@@ -16,7 +16,7 @@ class CFRE(nn.Module):
     def __loss__(self, att):
         """
         Calculate attn-related loss
-        # TODO: try different loss components: info/dir/con
+        # TODO: try different loss components
         """
 
         # input: attn_score
@@ -49,34 +49,57 @@ class CFRE(nn.Module):
         loss_dict["predict"] = outputs.loss.item()
         return loss, loss_dict
 
-    def mask_triplet(self, triplets, attn):
+    def mask_triplet(self, triplets, attn, strategy="drop"):
         """
+        `strategy` can be set as "drop" or "mask", "drop" as default.
         Mask tokenized triplets using attn
+        # TODO: now we prefer "drop" strategy with ordered K-sampling w.o. replacement.
         """
         # Example: triplets converted into strings
 
         # Load the tokenizer
+        assert len(triplets) == attn.shape[0]
+
         def triplet_to_str(triplet):
             return f"({triplet[0]},{triplet[1]},{triplet[2]})"
         # Tokenize each triplet string
-        tokenized_triplets = [self.llms.tokenizer(triplet_to_str(triplet), return_tensors="pt")
-                              for triplet in triplets]
 
-        # Get the lengths of the tokenized triplets (number of tokens in each triplet)
-        triplet_lengths = [len(tokenized_triplet["input_ids"].squeeze()) for tokenized_triplet in tokenized_triplets]
+        if strategy == "drop":
+            # In this strategy, just drop the unselected triplets.
+            keep_idx = [idx for idx, score in enumerate(attn) if score.item() == 1]
 
-        masks = torch.cat([attn[i].expand(triplet_lengths[i]) for i in range(len(attn))])
+            tokenized_triplets = [self.llms.tokenizer(triplet_to_str(triplets[idx]), return_tensors="pt")
+                                  for idx in keep_idx]
+            triplets_token_ids = torch.cat(
+                [tokenized_triplet["input_ids"].squeeze() for tokenized_triplet in tokenized_triplets])
 
-        # Concatenate all tokenized triplets into a single tensor sequence
-        concatenated_token_ids = torch.cat(
-            [tokenized_triplet["input_ids"].squeeze() for tokenized_triplet in tokenized_triplets])
+            triplet_lengths = [len(tokenized_triplet["input_ids"].squeeze()) for tokenized_triplet in
+                               tokenized_triplets]
+            attns = torch.cat([
+                attn[idx].expand(length) for idx, length in zip(keep_idx, triplet_lengths)
+            ])
 
-        mu = self.llms.tokenizer.encode(PLACEHOLDER, add_special_tokens=False)[0]  # Using the [MASK] token's ID
+            masked_token_ids = attns * triplets_token_ids
 
-        # Create a placeholder tensor with the same length as concatenated token IDs, filled with the [MASK] token ID
-        placeholder_tensor = torch.full_like(concatenated_token_ids, mu)
-        # Apply the mask (element-wise multiplication)
-        masked_token_ids = masks * concatenated_token_ids + (1 - masks) * placeholder_tensor
+        elif strategy == "mask":
+            tokenized_triplets = [self.llms.tokenizer(triplet_to_str(triplet), return_tensors="pt")
+                                  for (triplet, score) in zip(triplets, attn)]
+            triplets_token_ids = torch.cat(
+                [tokenized_triplet["input_ids"].squeeze() for tokenized_triplet in tokenized_triplets])
+
+            # Get the lengths of the tokenized triplets (number of tokens in each triplet)
+            triplet_lengths = [len(tokenized_triplet["input_ids"].squeeze()) for tokenized_triplet in tokenized_triplets]
+            masks = torch.cat([attn[i].expand(triplet_lengths[i]) for i in range(len(attn))])
+
+            mu = self.llms.tokenizer.encode(PLACEHOLDER, add_special_tokens=False)[0]  # Using the [MASK] token's ID
+            # Create a placeholder tensor with the same length as concatenated token IDs
+            placeholders = torch.full_like(triplets_token_ids, mu)
+            # Apply the mask (element-wise multiplication)
+            masked_token_ids = masks * triplets_token_ids + (1 - masks) * placeholders
+
+        else:
+            raise NotImplementedError
+
         return masked_token_ids
 
     def print_trainable_params(self):
