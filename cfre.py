@@ -53,6 +53,7 @@ class CFRE(nn.Module):
         """
         `strategy` can be set as "drop" or "mask", "drop" as default.
         Mask tokenized triplets using attn
+        # Note this method is achieved based on sample-wise not batch-wise.
         # TODO: now we prefer "drop" strategy with ordered K-sampling w.o. replacement.
         """
         # Example: triplets converted into strings
