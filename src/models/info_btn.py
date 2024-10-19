@@ -4,6 +4,7 @@ This file is temporarily not useful.
 import torch
 import torch.nn as nn
 from gnn import SAGE, SAGEConv
+from src.utils import gumbel_topk
 
 
 class FineGrainedRetriever(nn.Module):
@@ -99,16 +100,25 @@ class FineGrainedRetriever(nn.Module):
         ], dim=1)
         # attention logits for each triplet.
         attn_logtis = self.pred(h_triple)
-        # TODO: consider different modelling strategy of subgraph extraction
-        # TODO: 1) independent Bernoulli 2) sampling from categorical
-        return self.concrete_sample(attn_logtis, )
+        return self.sampling(attn_logtis, strategy="topk", K=50)
 
     @staticmethod
-    def concrete_sample(att_log_logit, temp=1, training=True):
-        if training:
+    def sampling(att_log_logit, temp=1, strategy="topk", K=50, training=True):
+        """
+        strategy = "idp-bern" or "topk"
+        K only applies when `strategy` set to "topk"
+        """
+        if not training:
+            return att_log_logit.sigmoid()
+
+        # training -- introduce stochastic
+        if strategy == "idp-bern":
+            # TODO: add straight-through gumbel.
             random_noise = torch.empty_like(att_log_logit).uniform_(1e-10, 1 - 1e-10)
             random_noise = torch.log(random_noise) - torch.log(1.0 - random_noise)
-            att_bern = ((att_log_logit + random_noise) / temp).sigmoid()
+            return ((att_log_logit + random_noise) / temp).sigmoid()
+        elif strategy == "topk":
+            # TODO: Note the `dim`. Consider batch_size.
+            return gumbel_topk(att_log_logit, K=K, hard=True, dim=0)
         else:
-            att_bern = att_log_logit.sigmoid()
-        return att_bern
+            raise NotImplementedError

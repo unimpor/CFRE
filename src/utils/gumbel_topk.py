@@ -31,5 +31,5 @@ def gumbel_topk(logits: Tensor, K: int, tau: float = 1, hard: bool = False, eps:
 
 if __name__ == '__main__':
 
-    logits = torch.tensor([0.3, 0.5, 2.6, 3.3])
-    print(gumbel_topk(logits, K=2, hard=True))
+    logits = torch.tensor([[0.3], [0.5], [2.6], [3.3]])
+    print(gumbel_topk(logits, K=2, hard=True, dim=0))
