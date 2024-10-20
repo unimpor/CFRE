@@ -78,7 +78,7 @@ class CFRE(nn.Module):
                                tokenized_triplets]
             attns = torch.cat([
                 attn[idx].expand(length) for idx, length in zip(keep_idx, triplet_lengths)
-            ])
+            ])  # expand and cut.
 
             masked_token_ids = attns * triplets_token_ids
 
