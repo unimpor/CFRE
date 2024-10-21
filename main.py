@@ -1,6 +1,7 @@
 import argparse
 import yaml
 import torch
+import wandb
 from cfre import CFRE
 from torch.utils.data import DataLoader
 from torch.nn.utils import clip_grad_norm_
@@ -10,12 +11,17 @@ from src.utils import collate_fn, set_seed, save_checkpoint, reload_best_model
 
 def main():
     parser = argparse.ArgumentParser(description='CFRE')
+    parser.add_argument('--seed', type=int, help='random seed')
     parser.add_argument('--dataset', type=str, help='dataset used, option: ')
     parser.add_argument('--cuda', type=int, help='cuda device id, -1 for cpu')
     parser.add_argument('--config_path', type=str, help='path of config file')
     args = parser.parse_args()
 
     config = yaml.safe_load(args.config_path)
+
+    wandb.init(project=f"",
+               name=f"",
+               config=config)
 
     set_seed(config['env']['seed'])
 
@@ -77,12 +83,11 @@ def main():
 
         # Average Loss per epoch
         print(f"Epoch: {epoch}|{args.num_epochs}: "
-              f"Loss: {epoch_loss / len(train_loader)}"
+              f"Train Loss: {epoch_loss / len(train_loader)}"
               f"Supervisory Loss: ")
         wandb.log({'Train Loss (Epoch Mean)': epoch_loss / len(train_loader)})
 
         val_loss = 0.
-        eval_output = []
         cfre.eval()
         with torch.no_grad():
             for step, batch in enumerate(val_loader):
@@ -102,6 +107,7 @@ def main():
         if epoch - best_epoch >= args.patience:
             print(f'Early stop at epoch {epoch}')
             break
+    # Evaluation: 1) retriever performance 2) overall performance
 
 
 
