@@ -7,6 +7,7 @@ from torch.utils.data import DataLoader
 from torch.nn.utils import clip_grad_norm_
 from src.models import LLMs, FineGrainedRetriever
 from src.utils import collate_fn, set_seed, save_checkpoint, reload_best_model
+from src.datasets import RetrievalDataset
 
 
 def main():
@@ -27,10 +28,16 @@ def main():
 
     # Build retrieval dataset. Note: First consider only training IB.
     # Input: coarsely retrieved graph Output: ground truth Answer
+    # TODO: skip-no-path ?
+    train_set = RetrievalDataset(config=config, split='train',)
+    val_set = RetrievalDataset(config=config, split='val', )
+    test_set = RetrievalDataset(config=config, split='test', )
 
-    train_set =
-    val_set =
-    test_set =
+    # TODO: if we need to follow random splits
+    # if config['dataset']['random_split']:
+    #     train_set, val_set, test_set = random_split(
+    #         train_set, val_set, test_set, config['env']['seed'])
+
     train_loader = DataLoader(train_set, batch_size=1, shuffle=True, collate_fn=collate_fn)
     val_loader = DataLoader(val_set, batch_size=1, collate_fn=collate_fn)
     test_loader = DataLoader(test_set, batch_size=1, collate_fn=collate_fn)

@@ -17,18 +17,19 @@ class RetrievalDataset:
         self.data_name = config['dataset']['name']
         self.data = self._load_data(opj(self.root, self.data_name, "data", f"{self.split}.pkl"))
         # which contains some coarse retrieval results and shorted-path relevant info
-        # TODO: consider combining gpt-4 relevant triplets
+        # TODO: ask mufei which file we should use from
         self.scored_data = self._load_data(opj(self.root, self.data_name, "postpr", f"{self.split}.pkl"))
         # 'target_relevant_triples' 'scored_triples'
 
-        emb = self._load_emb(config[""])
+        self.emb = self._load_emb(config[""])
 
-        self.processed_data = self.assembly()
+        self.processed_data = self.assembly(config[""])
 
-    def assembly(self, ):
+    def assembly(self, coarse_filter=True):
         processed_data = []
         for sample in self.data:
             sample_id = sample['id']
+            sample.update(self.emb[sample_id])  # 'entity_embs', 'q_emb', 'relation_embs'
             try:
                 sample['a_entity'] = list(set(sample['a_entity']))
                 sample['a_entity_id_list'] = list(set(sample['a_entity_id_list']))
@@ -43,7 +44,11 @@ class RetrievalDataset:
 
             # TODO: add shorted-path and gpt relevant
             sample['relevant:shortest'] = {}
-            sample['relevant:gpt-4'] = {}
+            # sample['relevant:gpt-4'] = {}
+
+            if coarse_filter:
+                # TODO: coarse filtering: del sample['h_id_list'], sample['r_id_list'], sample['t_id_list'] according to self.scored_data
+                pass
 
             processed_data.append(sample)
 
