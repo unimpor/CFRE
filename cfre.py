@@ -4,9 +4,9 @@ from src.utils import PLACEHOLDER
 
 
 class CFRE(nn.Module):
-    def __init__(self, ibtn_module, llm_model, args, **kwargs):
+    def __init__(self, fg_retriever, llm_model, args, **kwargs):
         super().__init__()
-        self.ibtn = ibtn_module
+        self.ibtn = fg_retriever
         self.llms = llm_model
 
     @property
@@ -16,22 +16,22 @@ class CFRE(nn.Module):
     def __loss__(self, att):
         """
         Calculate attn-related loss
-        # TODO: try different loss components
+        return loss and loss_dict
         """
-
+        pass
         # input: attn_score
-        def get_r(decay_interval, decay_r, current_epoch, init_r=0.9, final_r=0.5):
-            r_ = init_r - current_epoch // decay_interval * decay_r
-            return final_r if r_ < final_r else r_
+        # def get_r(decay_interval, decay_r, current_epoch, init_r=0.9, final_r=0.5):
+        #     r_ = init_r - current_epoch // decay_interval * decay_r
+        #     return final_r if r_ < final_r else r_
 
-        r = self.fix_r if self.fix_r else get_r(self.decay_interval, self.decay_r, epoch, self.init_r, self.final_r)
-        info_loss = (att * torch.log(att / r + 1e-6) + (1 - att) * torch.log((1 - att) / (1 - r + 1e-6) + 1e-6)).mean()
+        # r = self.fix_r if self.fix_r else get_r(self.decay_interval, self.decay_r, epoch, self.init_r, self.final_r)
+        # info_loss = (att * torch.log(att / r + 1e-6) + (1 - att) * torch.log((1 - att) / (1 - r + 1e-6) + 1e-6)).mean()
 
-        con_loss = None
-
-        dir_loss = None
-
-        return info_loss + con_loss + dir_loss, {"info": info_loss.item(), "con": con_loss.item(), "dir": dir_loss.item()}
+        # con_loss = None
+        #
+        # dir_loss = None
+        #
+        # return info_loss + con_loss + dir_loss, {"info": info_loss.item(), "con": con_loss.item(), "dir": dir_loss.item()}
 
     def forward_pass(self, data):
         # 1. post-extract batch-data items
@@ -54,7 +54,7 @@ class CFRE(nn.Module):
         `strategy` can be set as "drop" or "mask", "drop" as default.
         Mask tokenized triplets using attn
         # Note this method is achieved based on sample-wise not batch-wise.
-        # TODO: now we prefer "drop" strategy with ordered K-sampling w.o. replacement.
+        # we prefer "drop" strategy with ordered K-sampling w.o. replacement.
         """
         # Example: triplets converted into strings
 

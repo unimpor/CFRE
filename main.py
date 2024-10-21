@@ -1,15 +1,24 @@
 import argparse
-
+import yaml
+import torch
 from cfre import CFRE
+from torch.utils.data import DataLoader
+from torch.nn.utils import clip_grad_norm_
 from src.models import LLMs, FineGrainedRetriever
-from src.utils import collate_fn
+from src.utils import collate_fn, set_seed, save_checkpoint, reload_best_model
 
 
 def main():
     parser = argparse.ArgumentParser(description='CFRE')
     parser.add_argument('--dataset', type=str, help='dataset used, option: ')
     parser.add_argument('--cuda', type=int, help='cuda device id, -1 for cpu')
+    parser.add_argument('--config_path', type=str, help='path of config file')
     args = parser.parse_args()
+
+    config = yaml.safe_load(args.config_path)
+
+    set_seed(config['env']['seed'])
+
     # Build retrieval dataset. Note: First consider only training IB.
     # Input: coarsely retrieved graph Output: ground truth Answer
 
@@ -23,10 +32,77 @@ def main():
     # Build Model. Load ibtn, llms, cfre.
     # Options for ibtn: 1) MLP; 2) GNN+MLP
     ibtn = FineGrainedRetriever()
-    llms = LLMs()
-    cfre = CFRE()
+    llms = LLMs(config)
+    cfre = CFRE(fg_retriever=ibtn, llm_model=llms, args=config)
+    trainable_params, all_param = cfre.print_trainable_params()
+    print(f"trainable params: {trainable_params} || all params: {all_param} || trainable%: {100 * trainable_params / all_param}")
 
-    # Set Optimizer. Optimizer TBD
+    # Set up Optimizer.
+    params = [p for _, p in cfre.named_parameters() if p.requires_grad]
+    optimizer = torch.optim.AdamW(
+        [{'params': params, 'lr': args.lr, 'weight_decay': args.wd}, ],
+        betas=(0.9, 0.95)
+    )
+
+    # Step 5. Training one epoch and batch
+
+    num_training_steps = args.num_epochs * len(train_loader)
+    best_val_loss = float('inf')
+
+    for epoch in range(args.num_epochs):
+
+        cfre.train()
+        epoch_loss, accum_loss = 0., 0.
+
+        for step, batch in enumerate(train_loader):
+
+            optimizer.zero_grad()
+            loss, loss_dict = cfre.forward_pass(batch)
+            loss.backward()
+
+            # TODO: gradient and learning rate adjustment
+            # clip_grad_norm_(optimizer.param_groups[0]['params'], 0.1)
+            #
+            # if (step + 1) % args.grad_steps == 0:
+            #     adjust_learning_rate(optimizer.param_groups[0], args.lr, step / len(train_loader) + epoch, args)
+
+            optimizer.step()
+            epoch_loss, accum_loss = epoch_loss + loss.item(), accum_loss + loss.item()
+
+            # if (step + 1) % args.grad_steps == 0:
+            #     lr = optimizer.param_groups[0]["lr"]
+            #     wandb.log({'Lr': lr})
+            #     wandb.log({'Accum Loss': accum_loss / args.grad_steps})
+            #     accum_loss = 0.
+
+        # Average Loss per epoch
+        print(f"Epoch: {epoch}|{args.num_epochs}: "
+              f"Loss: {epoch_loss / len(train_loader)}"
+              f"Supervisory Loss: ")
+        wandb.log({'Train Loss (Epoch Mean)': epoch_loss / len(train_loader)})
+
+        val_loss = 0.
+        eval_output = []
+        cfre.eval()
+        with torch.no_grad():
+            for step, batch in enumerate(val_loader):
+                loss = cfre(batch)
+                val_loss += loss.item()
+            val_loss = val_loss/len(val_loader)
+            print(f"Epoch: {epoch}|{args.num_epochs}: Val Loss: {val_loss}")
+            wandb.log({'Val Loss': val_loss})
+
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            save_checkpoint(cfre, optimizer, epoch, args, is_best=True)
+            best_epoch = epoch
+
+        print(f'Epoch {epoch} Val Loss {val_loss} Best Val Loss {best_val_loss} Best Epoch {best_epoch}')
+
+        if epoch - best_epoch >= args.patience:
+            print(f'Early stop at epoch {epoch}')
+            break
+
 
 
 if __name__ == '__main__':
