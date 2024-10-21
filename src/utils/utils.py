@@ -27,7 +27,8 @@ def collate_fn(data):
     t_id_tensor = torch.tensor(t_id_list)
 
     num_non_text_entities = len(sample['non_text_entity_list'])
-
+    # TODO； sample['topic_entity_one_hot'], sample['target_triple_probs']
     return h_id_tensor, r_id_tensor, t_id_tensor, sample['q_emb'], \
            sample['entity_embs'], num_non_text_entities, sample['relation_embs'], \
-           sample['topic_entity_one_hot'], sample['target_triple_probs'], sample['a_entity_id_list']
+           sample['topic_entity_one_hot'], \
+           sample['a_entity_id_list']
