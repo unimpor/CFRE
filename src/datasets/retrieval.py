@@ -69,10 +69,10 @@ class RetrievalDataset:
 
                 for h_id, r_id, t_id in zip(sample['h_id_list'], sample['r_id_list'], sample['t_id_list']):
                     h, r, t = entity_list[h_id], relation_list[r_id], entity_list[t_id]
-                    if (h,r,t) in filtered_triplets:
-                        fh_id_list.append(h)
-                        fr_id_list.append(r)
-                        ft_id_list.append(t)
+                    if (h, r, t) in filtered_triplets:
+                        fh_id_list.append(h_id)
+                        fr_id_list.append(r_id)
+                        ft_id_list.append(t_id)
                 assert len(fh_id_list) == len(fr_id_list) == len(ft_id_list) == filter_K
                 sample['h_id_list'], sample['r_id_list'], sample['t_id_list'] = fh_id_list, fr_id_list, ft_id_list
 
