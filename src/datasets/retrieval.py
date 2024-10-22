@@ -54,10 +54,27 @@ class RetrievalDataset:
             # TODO: GPT-4 relevant info
             # sample['relevant:gpt-4'] = {}
 
+            # TODO: double check this
             if coarse_filter:
+                fh_id_list, fr_id_list, ft_id_list = [], [], []
+                filter_K = self.config[""]
+                # TODO: check `scored_triplets` is pre-sorted.
                 scored_triplets = self.scored_data[sample_id]['scored_triples']
-                # TODO: coarse filtering: del sample['h_id_list'], sample['r_id_list'], sample['t_id_list'] according to self.scored_data
-                pass
+                assert len(scored_triplets) == len(sample["h_id_list"])
+                filtered_triplets = scored_triplets[:filter_K]
+
+                # TODO: check if it is correct.
+                entity_list = sample['text_entity_list'] + sample['non_text_entity_list']
+                relation_list = sample['relation_list']
+
+                for h_id, r_id, t_id in zip(sample['h_id_list'], sample['r_id_list'], sample['t_id_list']):
+                    h, r, t = entity_list[h_id], relation_list[r_id], entity_list[t_id]
+                    if (h,r,t) in filtered_triplets:
+                        fh_id_list.append(h)
+                        fr_id_list.append(r)
+                        ft_id_list.append(t)
+
+                sample['h_id_list'], sample['r_id_list'], sample['t_id_list'] = fh_id_list, fr_id_list, ft_id_list
 
             processed_data.append(sample)
 
