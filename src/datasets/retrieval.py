@@ -18,14 +18,22 @@ class RetrievalDataset:
         self.data = self._load_data(opj(self.root, self.data_name, "data", f"{self.split}.pkl"))
         # which contains some coarse retrieval results and shorted-path relevant info
         # TODO: ask mufei which file we should use from
-        self.scored_data = self._load_data(opj(self.root, self.data_name, "postpr", f"{self.split}.pkl"))
+        self.scored_data = self._load_data(opj(self.root, self.data_name, "scored", f"{self.split}.pkl"))
         # 'target_relevant_triples' 'scored_triples'
 
         self.emb = self._load_emb(config[""])
 
-        self.processed_data = self.assembly(config[""])
+        self.processed_data = self.process(config[""])
 
-    def assembly(self, coarse_filter=True):
+    @property
+    def processed_file_names(self):
+        return opj(self.root, self.data_name, "processed", f"{self.split}.pth")
+
+    def process(self, coarse_filter=True):
+
+        if os.path.exists(self.processed_file_names):
+            return torch.load(self.processed_file_names)
+
         processed_data = []
         for sample in self.data:
             sample_id = sample['id']
@@ -42,15 +50,18 @@ class RetrievalDataset:
             topic_entity_one_hot = F.one_hot(topic_entity_mask.long(), num_classes=2)
             sample['topic_entity_one_hot'] = topic_entity_one_hot.float()
 
-            # TODO: add shorted-path and gpt relevant
-            sample['relevant:shortest'] = {}
+            sample['relevant:shortest'] = self.scored_data[sample_id]['target_relevant_triples']
+            # TODO: GPT-4 relevant info
             # sample['relevant:gpt-4'] = {}
 
             if coarse_filter:
+                scored_triplets = self.scored_data[sample_id]['scored_triples']
                 # TODO: coarse filtering: del sample['h_id_list'], sample['r_id_list'], sample['t_id_list'] according to self.scored_data
                 pass
 
             processed_data.append(sample)
+
+        torch.save(processed_data, self.processed_file_names)
 
         return processed_data
 
@@ -70,3 +81,9 @@ class RetrievalDataset:
                 dict_file = torch.load(full_file)
                 full_dict.update(dict_file)
         return full_dict
+
+    def __len__(self):
+        return len(self.processed_data)
+
+    def __getitem__(self, i):
+        return self.processed_data[i]
