@@ -29,9 +29,10 @@ def main():
     # Build retrieval dataset. Note: First consider only training IB.
     # Input: coarsely retrieved graph Output: ground truth Answer
     # TODO: skip-no-path ?
-    train_set = RetrievalDataset(config=config, split='train',)
-    val_set = RetrievalDataset(config=config, split='val', )
-    test_set = RetrievalDataset(config=config, split='test', )
+    dataset_config = config["dataset"]
+    train_set = RetrievalDataset(config=dataset_config, split='train', )
+    val_set = RetrievalDataset(config=dataset_config, split='val', )
+    test_set = RetrievalDataset(config=dataset_config, split='test', )
 
     # TODO: if we need to follow random splits
     # if config['dataset']['random_split']:
@@ -48,7 +49,8 @@ def main():
     llms = LLMs(config)
     cfre = CFRE(fg_retriever=ibtn, llm_model=llms, args=config)
     trainable_params, all_param = cfre.print_trainable_params()
-    print(f"trainable params: {trainable_params} || all params: {all_param} || trainable%: {100 * trainable_params / all_param}")
+    print(
+        f"trainable params: {trainable_params} || all params: {all_param} || trainable%: {100 * trainable_params / all_param}")
 
     # Set up Optimizer.
     params = [p for _, p in cfre.named_parameters() if p.requires_grad]
@@ -68,7 +70,6 @@ def main():
         epoch_loss, accum_loss = 0., 0.
 
         for step, batch in enumerate(train_loader):
-
             optimizer.zero_grad()
             loss, loss_dict = cfre.forward_pass(batch)
             loss.backward()
@@ -100,7 +101,7 @@ def main():
             for step, batch in enumerate(val_loader):
                 loss = cfre(batch)
                 val_loss += loss.item()
-            val_loss = val_loss/len(val_loader)
+            val_loss = val_loss / len(val_loader)
             print(f"Epoch: {epoch}|{args.num_epochs}: Val Loss: {val_loss}")
             wandb.log({'Val Loss': val_loss})
 
@@ -115,7 +116,6 @@ def main():
             print(f'Early stop at epoch {epoch}')
             break
     # Evaluation: 1) retriever performance 2) overall performance
-
 
 
 if __name__ == '__main__':

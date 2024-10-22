@@ -13,17 +13,17 @@ class RetrievalDataset:
     def __init__(self, config, split):
         self.split = split
         self.config = config
-        self.root = config['dataset']['root']
-        self.data_name = config['dataset']['name']
+        self.root = config['root']
+        self.data_name = config['name']
         self.data = self._load_data(opj(self.root, self.data_name, "data", f"{self.split}.pkl"))
         # which contains some coarse retrieval results and shorted-path relevant info
         # TODO: ask mufei which file we should use from
         self.scored_data = self._load_data(opj(self.root, self.data_name, "scored", f"{self.split}.pkl"))
         # 'target_relevant_triples' 'scored_triples'
 
-        self.emb = self._load_emb(config[""])
+        self.emb = self._load_emb(config["emb_name"])
 
-        self.processed_data = self.process(config[""])
+        self.processed_data = self.process(config["coarse_filter"])
 
     @property
     def processed_file_names(self):
@@ -61,7 +61,7 @@ class RetrievalDataset:
             # TODO: double check this
             if coarse_filter:
                 fh_id_list, fr_id_list, ft_id_list = [], [], []
-                filter_K = self.config[""]
+                filter_K = self.config["coarse_num"]
                 # TODO: check `scored_triplets` is pre-sorted.
                 scored_triplets = self.scored_data[sample_id]['scored_triples']
                 assert len(scored_triplets) == len(sample["h_id_list"])
