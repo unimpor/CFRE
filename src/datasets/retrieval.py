@@ -61,7 +61,7 @@ class RetrievalDataset:
                 # TODO: check `scored_triplets` is pre-sorted.
                 scored_triplets = self.scored_data[sample_id]['scored_triples']
                 assert len(scored_triplets) == len(sample["h_id_list"])
-                filtered_triplets = scored_triplets[:filter_K]
+                filtered_triplets = [(t[0], t[1], t[2]) for idx, t in enumerate(scored_triplets) if idx < filter_K]
 
                 # TODO: check if it is correct.
                 entity_list = sample['text_entity_list'] + sample['non_text_entity_list']
@@ -73,7 +73,7 @@ class RetrievalDataset:
                         fh_id_list.append(h)
                         fr_id_list.append(r)
                         ft_id_list.append(t)
-
+                assert len(fh_id_list) == len(fr_id_list) == len(ft_id_list) == filter_K
                 sample['h_id_list'], sample['r_id_list'], sample['t_id_list'] = fh_id_list, fr_id_list, ft_id_list
 
             processed_data.append(sample)
