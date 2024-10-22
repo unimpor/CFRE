@@ -4,10 +4,11 @@ from src.utils import PLACEHOLDER
 
 
 class CFRE(nn.Module):
-    def __init__(self, fg_retriever, llm_model, args, **kwargs):
+    def __init__(self, fg_retriever, llm_model, config, **kwargs):
         super().__init__()
         self.ibtn = fg_retriever
         self.llms = llm_model
+        self.strategy = config['triplet2text']
 
     @property
     def device(self):
@@ -33,15 +34,15 @@ class CFRE(nn.Module):
         #
         # return info_loss + con_loss + dir_loss, {"info": info_loss.item(), "con": con_loss.item(), "dir": dir_loss.item()}
 
-    def forward_pass(self, data):
+    def forward_pass(self, batch):
         # 1. post-extract batch-data items
 
         # 2. generate mask for the coarsely retrieved samples.
-        attn_bern = self.ibtn()
+        attns = self.ibtn(batch)
         attn__loss, loss_dict = self.__loss__()  # calculate attn-related loss
 
         # 3. generate filtered retrieval results
-        batch_masked_triple_token_ids = [self.mask_triplet(triplets, attn_bern) for (triplets, attn_bern) in zip()]
+        batch_masked_triple_token_ids = [self.mask_triplet(triplets, attn) for (triplets, attn) in zip()]
 
         # 4. LLM supervisions
         outputs = self.llms.forward_pass(batch_masked_triple_token_ids)
@@ -49,7 +50,7 @@ class CFRE(nn.Module):
         loss_dict["predict"] = outputs.loss.item()
         return loss, loss_dict
 
-    def mask_triplet(self, triplets, attn, strategy="drop"):
+    def mask_triplet(self, triplets, attn, ):
         """
         `strategy` can be set as "drop" or "mask", "drop" as default.
         Mask tokenized triplets using attn
@@ -65,7 +66,7 @@ class CFRE(nn.Module):
             return f"({triplet[0]},{triplet[1]},{triplet[2]})"
         # Tokenize each triplet string
 
-        if strategy == "drop":
+        if self.strategy == "drop":
             # In this strategy, just drop the unselected triplets.
             keep_idx = [idx for idx, score in enumerate(attn) if score.item() == 1]
 
@@ -82,7 +83,7 @@ class CFRE(nn.Module):
 
             masked_token_ids = attns * triplets_token_ids
 
-        elif strategy == "mask":
+        elif self.strategy == "mask":
             tokenized_triplets = [self.llms.tokenizer(triplet_to_str(triplet), return_tensors="pt")
                                   for (triplet, score) in zip(triplets, attn)]
             triplets_token_ids = torch.cat(

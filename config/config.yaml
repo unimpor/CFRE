@@ -24,9 +24,15 @@ train:
 retriever:
   gnn:
     model_type: graphsage
+    topic_pe: true
+    hidden_size: 512
+    num_layers: 5
+    aggr: 'mean'
+    learn_non_text: True
 
 algorithm:
-  sampling: topk # "topk" or "idp-bern"
+  filtering: topk # "topk" or "idp-bern"
+  filtering_num_or_ratio: 500 # int or float
   triplet2text: drop # "drop" or "mask"
 
 #    # Inference
@@ -40,8 +46,6 @@ algorithm:
 #    parser.add_argument("--max_memory", type=csv_list, default=[80,80])
 #
 #    # GNN related
-#    parser.add_argument("--gnn_model_name", type=str, default='gt')
-#    parser.add_argument("--gnn_num_layers", type=int, default=4)
 #    parser.add_argument("--gnn_in_dim", type=int, default=1024)
 #    parser.add_argument("--gnn_hidden_dim", type=int, default=1024)
 #    parser.add_argument("--gnn_num_heads", type=int, default=4)

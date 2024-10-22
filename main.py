@@ -19,35 +19,38 @@ def main():
     args = parser.parse_args()
 
     config = yaml.safe_load(args.config_path)
-
+    train_config = config['train']
+    algo_config = config['algorithm']
     wandb.init(project=f"",
                name=f"",
                config=config)
 
-    set_seed(config['env']['seed'])
+    set_seed(config['train']['seed'])
 
     # Build retrieval dataset. Note: First consider only training IB.
     # Input: coarsely retrieved graph Output: ground truth Answer
     # TODO: skip-no-path ?
-    dataset_config = config["dataset"]
-    train_set = RetrievalDataset(config=dataset_config, split='train', )
-    val_set = RetrievalDataset(config=dataset_config, split='val', )
-    test_set = RetrievalDataset(config=dataset_config, split='test', )
+
+    train_set = RetrievalDataset(config=config["dataset"], split='train', )
+    val_set = RetrievalDataset(config=config["dataset"], split='val', )
+    test_set = RetrievalDataset(config=config["dataset"], split='test', )
 
     # TODO: if we need to follow random splits
     # if config['dataset']['random_split']:
     #     train_set, val_set, test_set = random_split(
     #         train_set, val_set, test_set, config['env']['seed'])
 
-    train_loader = DataLoader(train_set, batch_size=1, shuffle=True, collate_fn=collate_fn)
-    val_loader = DataLoader(val_set, batch_size=1, collate_fn=collate_fn)
-    test_loader = DataLoader(test_set, batch_size=1, collate_fn=collate_fn)
+    train_loader = DataLoader(train_set, batch_size=train_config['batch_size'], shuffle=True, collate_fn=collate_fn)
+    val_loader = DataLoader(val_set, batch_size=train_config['batch_size'], collate_fn=collate_fn)
+    test_loader = DataLoader(test_set, batch_size=train_config['batch_size'], collate_fn=collate_fn)
 
     # Build Model. Load ibtn, llms, cfre.
-    # Options for ibtn: 1) MLP; 2) GNN+MLP
-    ibtn = FineGrainedRetriever()
-    llms = LLMs(config)
-    cfre = CFRE(fg_retriever=ibtn, llm_model=llms, args=config)
+    ibtn = FineGrainedRetriever(config=config['retriever']['gnn'],
+                                filtering_strategy=algo_config['filtering'],
+                                filtering_num_or_ratio=algo_config['filtering_num_or_ratio']
+                                )
+    llms = LLMs(config['llms'])
+    cfre = CFRE(fg_retriever=ibtn, llm_model=llms, args=config['algorithm'])
     trainable_params, all_param = cfre.print_trainable_params()
     print(
         f"trainable params: {trainable_params} || all params: {all_param} || trainable%: {100 * trainable_params / all_param}")
@@ -55,7 +58,7 @@ def main():
     # Set up Optimizer.
     params = [p for _, p in cfre.named_parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(
-        [{'params': params, 'lr': args.lr, 'weight_decay': args.wd}, ],
+        [{'params': params, 'lr': train_config["lr"], 'weight_decay': train_config["wd"]}, ],
         betas=(0.9, 0.95)
     )
 
@@ -75,10 +78,11 @@ def main():
             loss.backward()
 
             # TODO: gradient and learning rate adjustment
-            # clip_grad_norm_(optimizer.param_groups[0]['params'], 0.1)
-            #
-            # if (step + 1) % args.grad_steps == 0:
-            #     adjust_learning_rate(optimizer.param_groups[0], args.lr, step / len(train_loader) + epoch, args)
+            # from G-Retriever
+            clip_grad_norm_(optimizer.param_groups[0]['params'], 0.1)
+
+            if (step + 1) % args.grad_steps == 0:
+                adjust_learning_rate(optimizer.param_groups[0], args.lr, step / len(train_loader) + epoch, args)
 
             optimizer.step()
             epoch_loss, accum_loss = epoch_loss + loss.item(), accum_loss + loss.item()
@@ -107,7 +111,8 @@ def main():
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            save_checkpoint(cfre, optimizer, epoch, args, is_best=True)
+            # save fg retriever
+            save_checkpoint(cfre.ibtn, optimizer, epoch, args, is_best=True)
             best_epoch = epoch
 
         print(f'Epoch {epoch} Val Loss {val_loss} Best Val Loss {best_val_loss} Best Epoch {best_epoch}')

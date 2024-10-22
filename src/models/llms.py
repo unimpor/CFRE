@@ -10,7 +10,7 @@ from src.utils import FORMER, LATTER, LABEL
 IGNORE_INDEX = -100
 
 class LLMs(nn.Module):
-    def __init__(self, args):
+    def __init__(self, config):
         super().__init__()
 
         kwargs = {
@@ -19,20 +19,20 @@ class LLMs(nn.Module):
             "revision": "main",
         }
 
-        self.tokenizer = AutoTokenizer.from_pretrained(args.llm_model_path, use_fast=False, revision=kwargs["revision"])
+        self.tokenizer = AutoTokenizer.from_pretrained(config['llm_model_path'], use_fast=False, revision=kwargs["revision"])
         self.tokenizer.pad_token_id = 0
         self.tokenizer.padding_side = 'left'
 
         self.ignore_idx = IGNORE_INDEX  # not as supervision signal
 
         model = AutoModelForCausalLM.from_pretrained(
-            args.llm_model_path,
+            config['llm_model_path'],
             torch_dtype=torch.float16,
             low_cpu_mem_usage=True,
             **kwargs
         )
 
-        if args.llm_frozen == 'True':
+        if config['llm_frozen'] == 'True':
             print("Freezing LLAMA!")
             for name, param in model.named_parameters():
                 param.requires_grad = False

@@ -9,16 +9,19 @@ from src.utils import gumbel_topk
 
 class FineGrainedRetriever(nn.Module):
     def __init__(self,
-                 use_ans_pred,
-                 model_type,
-                 topic_pe,
-                 emb_size,
-                 learn_non_text_emb,
-                 relation_only,
-                 type_specific_kwargs):
+                 config,
+                 filtering_strategy,
+                 filtering_num_or_ratio,
+                 **kwargs):
         super().__init__()
 
-        if learn_non_text_emb:
+        self.strategy = filtering_strategy  # strategy of filtering irrelevant info
+        self.filter_num_or_ratio = filtering_num_or_ratio
+
+        emb_size = config['hidden_size']
+        model_type = config['model_type']
+
+        if config['learn_non_text']:
             self.non_text_entity_emb = nn.Embedding(1, emb_size)
         else:
             self.non_text_entity_emb = None
@@ -26,8 +29,10 @@ class FineGrainedRetriever(nn.Module):
         if model_type == 'graphsage':
             self.gnn = SAGE(
                 emb_size,
-                topic_pe,
-                **type_specific_kwargs)
+                config['topic_pe'],
+                config['num_layers'],
+                config['aggr']
+            )
         else:
             raise NotImplementedError(f'GNN type {model_type} not implemented.')
 
@@ -39,17 +44,10 @@ class FineGrainedRetriever(nn.Module):
             nn.Linear(emb_size, 1)
         )
 
-    def forward(self,
-                h_id_tensor,
-                r_id_tensor,
-                t_id_tensor,
-                q_emb,
-                entity_embs,
-                num_non_text_entities,
-                relation_embs,
-                topic_entity_one_hot,
-                ppr,
-                ans_score=None):
+    def forward(self, batch):
+        h_id_tensor, r_id_tensor, t_id_tensor, q_emb, entity_embs, \
+            num_non_text_entities, relation_embs, topic_entity_one_hot, _ = batch
+
         device = entity_embs.device
 
         edge_index = torch.stack([
@@ -77,7 +75,7 @@ class FineGrainedRetriever(nn.Module):
             t_id_tensor,
             h_id_tensor
         ], dim=0)
-
+        # TODO: adjust put sth from self.gnn.forward to here !
         h_e_list = self.gnn(
             edge_index,
             topic_entity_one_hot,
@@ -100,10 +98,9 @@ class FineGrainedRetriever(nn.Module):
         ], dim=1)
         # attention logits for each triplet.
         attn_logtis = self.pred(h_triple)
-        return self.sampling(attn_logtis, strategy="topk", K=50)
+        return self.sampling(attn_logtis)
 
-    @staticmethod
-    def sampling(att_log_logit, temp=1, strategy="topk", K=50, training=True):
+    def sampling(self, att_log_logit, temp=1, training=True):
         """
         strategy = "idp-bern" or "topk"
         K only applies when `strategy` set to "topk"
@@ -112,13 +109,13 @@ class FineGrainedRetriever(nn.Module):
             return att_log_logit.sigmoid()
 
         # training -- introduce stochastic
-        if strategy == "idp-bern":
+        if self.strategy == "idp-bern":
             # TODO: add straight-through gumbel.
             random_noise = torch.empty_like(att_log_logit).uniform_(1e-10, 1 - 1e-10)
             random_noise = torch.log(random_noise) - torch.log(1.0 - random_noise)
             return ((att_log_logit + random_noise) / temp).sigmoid()
-        elif strategy == "topk":
+        elif self.strategy == "topk":
             # TODO: Note the `dim`. Consider batch_size.
-            return gumbel_topk(att_log_logit, K=K, hard=True, dim=0)
+            return gumbel_topk(att_log_logit, K=self.filter_num_or_ratio, hard=True, dim=0)
         else:
             raise NotImplementedError
