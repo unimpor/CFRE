@@ -42,11 +42,11 @@ class SAGE(nn.Module):
             self.gnn_layer_list.append(SAGEConv(emb_size, aggr))
         self.topic_pe = topic_pe
 
-        self.proj_reverse = nn.Sequential(
-            nn.Linear(emb_size, emb_size),
-            nn.ReLU(),
-            nn.Linear(emb_size, emb_size)
-        )
+        # self.proj_reverse = nn.Sequential(
+        #     nn.Linear(emb_size, emb_size),
+        #     nn.ReLU(),
+        #     nn.Linear(emb_size, emb_size)
+        # )
 
         self.out_size = emb_size
         if self.topic_pe:
@@ -55,13 +55,10 @@ class SAGE(nn.Module):
     def forward(self,
                 edge_index,
                 topic_entity_one_hot,
-                reverse_edge_index,
-                h_q,
                 h_e,
                 h_r,
-                ppr,
-                num_non_text_entities,
-                ans_score):
+                **kwargs):
+        # TODO: werid...
         if self.topic_pe:
             h_e_list = [topic_entity_one_hot]
         else:
@@ -69,12 +66,12 @@ class SAGE(nn.Module):
 
         # num_edges = edge_index.shape[1]
         # h_q = h_q.expand(num_edges, -1)
-        h_r_reverse = self.proj_reverse(h_r)
-        h_r = torch.cat([h_r, h_r_reverse], dim=0)
-        edge_index = torch.cat([edge_index, reverse_edge_index], dim=1)
+
+        # h_r_reverse = self.proj_reverse(h_r)
+        # h_r = torch.cat([h_r, h_r_reverse], dim=0)
+        # edge_index = torch.cat([edge_index, reverse_edge_index], dim=1)
 
         for gnn_layer in self.gnn_layer_list:
-
             h_e = gnn_layer(edge_index, h_e, h_r)
         h_e_list.append(h_e)
 

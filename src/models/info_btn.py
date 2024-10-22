@@ -27,7 +27,7 @@ class FineGrainedRetriever(nn.Module):
             self.non_text_entity_emb = None
         # TODO: You may try different types of fg-retriever. But now only GraphSage implemented.
         if model_type == 'graphsage':
-            self.gnn = SAGE(
+            self.backbone = SAGE(
                 emb_size,
                 config['topic_pe'],
                 config['num_layers'],
@@ -36,12 +36,17 @@ class FineGrainedRetriever(nn.Module):
         else:
             raise NotImplementedError(f'GNN type {model_type} not implemented.')
 
-        pred_in_size = 2 * emb_size + 2 * self.gnn.out_size
+        pred_in_size = 2 * emb_size + 2 * self.backbone.out_size
 
         self.pred = nn.Sequential(
             nn.Linear(pred_in_size, emb_size),
             nn.ReLU(),
             nn.Linear(emb_size, 1)
+        )
+        self.proj_reverse = nn.Sequential(
+            nn.Linear(emb_size, emb_size),
+            nn.ReLU(),
+            nn.Linear(emb_size, emb_size)
         )
 
     def forward(self, batch):
@@ -75,17 +80,18 @@ class FineGrainedRetriever(nn.Module):
             t_id_tensor,
             h_id_tensor
         ], dim=0)
+
         # TODO: adjust put sth from self.gnn.forward to here !
-        h_e_list = self.gnn(
+        h_r_reverse = self.proj_reverse(h_r)
+        h_r = torch.cat([h_r, h_r_reverse], dim=0)
+        edge_index = torch.cat([edge_index, reverse_edge_index], dim=1)
+
+        # TODO: simplify its input
+        h_e_list = self.backbone(
             edge_index,
             topic_entity_one_hot,
-            reverse_edge_index,
-            h_q,
             h_e,
             h_r,
-            ppr,
-            num_non_text_entities,
-            ans_score
         )
         h_e = torch.cat(h_e_list, dim=1)
 
