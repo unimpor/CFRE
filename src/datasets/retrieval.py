@@ -37,6 +37,10 @@ class RetrievalDataset:
         processed_data = []
         for sample in self.data:
             sample_id = sample['id']
+            #  TODO: `skip_no_path`
+            if skip_no_path and (self.scored_data[sample_id]['max_path_length'] in [None, 0]):
+                continue
+
             sample.update(self.emb[sample_id])  # 'entity_embs', 'q_emb', 'relation_embs'
             try:
                 sample['a_entity'] = list(set(sample['a_entity']))
