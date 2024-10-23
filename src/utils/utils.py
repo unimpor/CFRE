@@ -2,6 +2,7 @@ import torch
 import random
 import numpy as np
 import networkx as nx
+import math
 
 
 def set_seed(seed):
@@ -12,6 +13,18 @@ def set_seed(seed):
     torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True
+
+
+def adjust_learning_rate(param_group, LR, epoch, args):
+    """Decay the learning rate with half-cycle cosine after warmup"""
+    min_lr = 5e-6
+    if epoch < args.warmup_epochs:
+        lr = LR * epoch / args.warmup_epochs
+    else:
+        lr = min_lr + (LR - min_lr) * 0.5 * (
+                    1.0 + math.cos(math.pi * (epoch - args.warmup_epochs) / (args.num_epochs - args.warmup_epochs)))
+    param_group["lr"] = lr
+    return lr
 
 
 def collate_fn(data):
@@ -29,6 +42,6 @@ def collate_fn(data):
     num_non_text_entities = len(sample['non_text_entity_list'])
     # TODO； sample['topic_entity_one_hot'], sample['target_triple_probs']
     return h_id_tensor, r_id_tensor, t_id_tensor, sample['q_emb'], \
-        sample['entity_embs'], num_non_text_entities, sample['relation_embs'], \
-        sample['topic_entity_one_hot'], \
-        sample['a_entity_id_list']
+           sample['entity_embs'], num_non_text_entities, sample['relation_embs'], \
+           sample['topic_entity_one_hot'], \
+           sample['a_entity_id_list']

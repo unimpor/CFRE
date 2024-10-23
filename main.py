@@ -6,7 +6,7 @@ from cfre import CFRE
 from torch.utils.data import DataLoader
 from torch.nn.utils import clip_grad_norm_
 from src.models import LLMs, FineGrainedRetriever
-from src.utils import collate_fn, set_seed, save_checkpoint, reload_best_model
+from src.utils import collate_fn, set_seed, save_checkpoint, reload_best_model, adjust_learning_rate
 from src.datasets import RetrievalDataset
 
 
