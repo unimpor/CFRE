@@ -12,7 +12,6 @@ from src.datasets import RetrievalDataset
 
 def main():
     parser = argparse.ArgumentParser(description='CFRE')
-    parser.add_argument('--seed', type=int, help='random seed')
     parser.add_argument('--dataset', type=str, help='dataset used, option: ')
     parser.add_argument('--cuda', type=int, help='cuda device id, -1 for cpu')
     parser.add_argument('--config_path', type=str, help='path of config file')
@@ -25,11 +24,7 @@ def main():
                name=f"",
                config=config)
 
-    set_seed(config['train']['seed'])
-
-    # Build retrieval dataset. Note: First consider only training IB.
-    # Input: coarsely retrieved graph Output: ground truth Answer
-    # TODO: skip-no-path ?
+    set_seed(config['env']['seed'])
 
     train_set = RetrievalDataset(config=config["dataset"], split='train', )
     val_set = RetrievalDataset(config=config["dataset"], split='val', )
@@ -51,7 +46,7 @@ def main():
                                 )
     llms = LLMs(config['llms'])
     cfre = CFRE(fg_retriever=ibtn, llm_model=llms, args=config['algorithm'])
-    trainable_params, all_param = cfre.print_trainable_params()
+    trainable_params, all_param = cfre.trainable_params
     print(
         f"trainable params: {trainable_params} || all params: {all_param} || trainable%: {100 * trainable_params / all_param}")
 
@@ -77,7 +72,7 @@ def main():
             loss, loss_dict = cfre.forward_pass(batch)
             loss.backward()
 
-            # TODO: gradient and learning rate adjustment
+            # gradient and learning rate adjustment
             # from G-Retriever
             clip_grad_norm_(optimizer.param_groups[0]['params'], 0.1)
 
@@ -99,7 +94,7 @@ def main():
               f"Supervisory Loss: ")
         wandb.log({'Train Loss (Epoch Mean)': epoch_loss / len(train_loader)})
 
-        val_loss = 0.
+        val_loss, best_epoch = 0., 0
         cfre.eval()
         with torch.no_grad():
             for step, batch in enumerate(val_loader):

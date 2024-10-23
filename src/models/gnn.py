@@ -59,6 +59,7 @@ class SAGE(nn.Module):
                 h_r,
                 **kwargs):
         # TODO: werid...
+        # TODO: Consider put topic_entity_one_hot to fg_retriever or here?
         if self.topic_pe:
             h_e_list = [topic_entity_one_hot]
         else:

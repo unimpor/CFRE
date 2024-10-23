@@ -39,7 +39,7 @@ class LLMs(nn.Module):
 
         self.model = model
 
-    def forward_pass(self, bm_triplet_ids, sample):
+    def forward_pass(self, bm_triplet_ids, batch_sample):
         """
         Calculate prediction loss given post-processed retrival contents.
         """

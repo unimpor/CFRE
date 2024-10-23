@@ -37,8 +37,8 @@ class RetrievalDataset:
         processed_data = []
         for sample in self.data:
             sample_id = sample['id']
-            #  TODO: `skip_no_path`
-            if skip_no_path and (self.scored_data[sample_id]['max_path_length'] in [None, 0]):
+            #  TODO: `skip_no_path`. If we should use shortest-relevant as explicit supervisory signal.
+            if self.config['skip_no_path'] and (self.scored_data[sample_id]['max_path_length'] in [None, 0]):
                 continue
 
             sample.update(self.emb[sample_id])  # 'entity_embs', 'q_emb', 'relation_embs'
@@ -61,7 +61,7 @@ class RetrievalDataset:
             # TODO: double check this
             if coarse_filter:
                 fh_id_list, fr_id_list, ft_id_list = [], [], []
-                filter_K = self.config["coarse_num"]
+                filter_K = self.config["coarse_num_or_ratio"]
                 # TODO: check `scored_triplets` is pre-sorted.
                 scored_triplets = self.scored_data[sample_id]['scored_triples']
                 assert len(scored_triplets) == len(sample["h_id_list"])

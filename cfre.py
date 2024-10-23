@@ -104,7 +104,8 @@ class CFRE(nn.Module):
 
         return masked_token_ids
 
-    def print_trainable_params(self):
+    @property
+    def trainable_params(self):
         trainable_params = 0
         all_param = 0
 
