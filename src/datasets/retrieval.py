@@ -15,6 +15,7 @@ class RetrievalDataset:
         self.config = config
         self.root = config['root']
         self.data_name = config['name']
+        self.coarse_filter = config["coarse_filter"]
         self.data = self._load_data(opj(self.root, self.data_name, "data", f"{self.split}.pkl"))
         # which contains some coarse retrieval results and shorted-path relevant info
         # TODO: ask mufei which file we should use from
@@ -23,7 +24,7 @@ class RetrievalDataset:
 
         self.emb = self._load_emb(config["emb_name"])
 
-        self.processed_data = self.process(config["coarse_filter"])
+        self.processed_data = self.process(self.coarse_filter)
 
     @property
     def processed_file_names(self):

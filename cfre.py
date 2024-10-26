@@ -9,6 +9,7 @@ class CFRE(nn.Module):
         self.ibtn = fg_retriever
         self.llms = llm_model
         self.strategy = config['triplet2text']
+        self.grad_normalize = config['grad_normalize']
 
     @property
     def device(self):
@@ -66,6 +67,16 @@ class CFRE(nn.Module):
             return f"({triplet[0]},{triplet[1]},{triplet[2]})"
         # Tokenize each triplet string
 
+        def create_hook(length, indices):
+
+            def custom_backward_hook(grad):
+                lengths = torch.ones_like(grad, dtype=torch.float32)
+                lengths[indices] = torch.tensor(length, dtype=torch.float32)
+                normalized_grad = grad / lengths  # Normalize by expansion lengths
+                return normalized_grad
+
+            return custom_backward_hook
+
         if self.strategy == "drop":
             # In this strategy, just drop the unselected triplets.
             keep_idx = [idx for idx, score in enumerate(attn) if score.item() == 1]
@@ -77,6 +88,10 @@ class CFRE(nn.Module):
 
             triplet_lengths = [len(tokenized_triplet["input_ids"].squeeze()) for tokenized_triplet in
                                tokenized_triplets]
+            # TODO: we may consider batch size > 1
+            if self.grad_normalize:
+                attn.register_hook(create_hook(lengths=triplet_lengths, indices=keep_idx))
+
             attns = torch.cat([
                 attn[idx].expand(length) for idx, length in zip(keep_idx, triplet_lengths)
             ])  # expand and cut.

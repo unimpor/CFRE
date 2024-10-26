@@ -43,6 +43,7 @@ algorithm:
   filtering: topk # "topk" or "idp-bern"
   filtering_num_or_ratio: 500 # int or float
   triplet2text: drop # "drop" or "mask"
+  grad_normalize: True
 
 #    # Inference
 #    parser.add_argument("--eval_batch_size", type=int, default=16)

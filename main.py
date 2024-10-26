@@ -2,6 +2,7 @@ import argparse
 import yaml
 import torch
 import wandb
+from tqdm import tqdm
 from cfre import CFRE
 from torch.utils.data import DataLoader
 from torch.nn.utils import clip_grad_norm_
@@ -62,7 +63,7 @@ def main():
     num_training_steps = args.num_epochs * len(train_loader)
     best_val_loss = float('inf')
 
-    for epoch in range(args.num_epochs):
+    for epoch in tqdm(range(args.num_epochs)):
 
         cfre.train()
         epoch_loss, accum_loss = 0., 0.

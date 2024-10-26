@@ -55,10 +55,7 @@ class FineGrainedRetriever(nn.Module):
 
         device = entity_embs.device
 
-        edge_index = torch.stack([
-            h_id_tensor,
-            t_id_tensor
-        ], dim=0)
+        edge_index = torch.stack([h_id_tensor, t_id_tensor], dim=0)
 
         h_q = q_emb
 

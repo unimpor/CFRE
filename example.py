@@ -23,27 +23,36 @@ class SecondMLP(nn.Module):
         return self.fc(x)
 
 
-mlp1 = SimpleMLP(input_dim=5, output_dim=3)
-mlp2 = SecondMLP(input_dim=4, output_dim=2)
+def create_hook(lengths):
+    def custom_backward_hook(grad):
+        normalized_grad = grad / lengths  # Normalize by expansion lengths
+        return normalized_grad
+
+    return custom_backward_hook
+
+
+mlp1 = SimpleMLP(input_dim=3, output_dim=1)
+mlp2 = SecondMLP(input_dim=10, output_dim=2)
 
 optimizer1 = optim.SGD(mlp1.parameters(), lr=0.01)
 optimizer2 = optim.SGD(mlp2.parameters(), lr=0.01)
 
-input_tensor = torch.randn(5)
+input_tensor = torch.randn((5, 3))
 
-output1 = mlp1(input_tensor)
+output1 = mlp1(input_tensor).squeeze()
+output1.register_hook(create_hook(lengths=torch.tensor([1., 2., 3., 4., 1.])))
+expanded_output = torch.cat([output1[i].expand(i + 1) for i in range(len(output1) - 1)])
+print(expanded_output.dtype)
+print(expanded_output)
 
-expanded_output = torch.cat([output1[i].expand(2) for i in range(len(output1)-1)])
-mult_vector = torch.ones_like(expanded_output, requires_grad=False)
-
+mult_vector = torch.randn(expanded_output.shape, requires_grad=False)
 b = expanded_output * mult_vector
 
 # for leaf-tensor
-expanded_output.retain_grad()
 output1.retain_grad()
+expanded_output.retain_grad()
 
 output2 = mlp2(b)
-output2.retain_grad()
 
 target = torch.tensor([1.0, 1.0])
 loss_fn = nn.MSELoss()
@@ -56,14 +65,14 @@ loss.backward()
 
 optimizer1.step()
 optimizer2.step()
-
-print(output2.grad)  # output[1].grad[0] -> 0.00, as output[1] does not contribute to the loss.
+# hook_handle.remove()
 print(expanded_output.grad)
 print(output1.grad)  # output1.grad[2] -> 0.00. See Line 36, output1[2] does not contribute to latter calculation
 
-for i in range(2):
-    print(expanded_output.grad[2*i] + expanded_output.grad[2*i+1] == output1.grad[i])  # expand <--> grad sum
-
+print((expanded_output.grad[1] + expanded_output.grad[2]) / 2 == output1.grad[1])
+print((expanded_output.grad[3] + expanded_output.grad[4] + expanded_output.grad[5]) / 3 == output1.grad[2])
+print((expanded_output.grad[6] + expanded_output.grad[7] + expanded_output.grad[8] + expanded_output.grad[9]) / 4 ==
+      output1.grad[3])
 # Check the gradients of the original MLP's parameters
 # print("Gradients of MLP1 parameters (before expansion):")
 # for name, param in mlp1.named_parameters():
