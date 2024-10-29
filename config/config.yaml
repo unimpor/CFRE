@@ -20,7 +20,7 @@ train:
   lr: 1e-5
   wd: 0.05
   patience: 2
-  batch_size: 8
+  batch_size: 1
   grad_steps: 2
   num_epochs: 10
   warmup_epochs: 2
