@@ -1,7 +1,7 @@
 import argparse
 import yaml
 import torch
-import wandb
+# import wandb
 from tqdm import tqdm
 from cfre import CFRE
 from torch.utils.data import DataLoader
@@ -18,7 +18,7 @@ def main():
     parser.add_argument('--config_path', type=str, default="./config/config.yaml", help='path of config file')
     args = parser.parse_args()
 
-    config = yaml.safe_load(args.config_path)
+    config = yaml.safe_load(open(args.config_path, 'r'))
     train_config = config['train']
     algo_config = config['algorithm']
     # wandb.init(project=f"",
@@ -26,19 +26,18 @@ def main():
     #            config=config)
 
     set_seed(config['env']['seed'])
-
-    train_set = RetrievalDataset(config=config["dataset"], split='train', )
+    # train_set = RetrievalDataset(config=config["dataset"], split='train', )
     val_set = RetrievalDataset(config=config["dataset"], split='val', )
-    test_set = RetrievalDataset(config=config["dataset"], split='test', )
+    # test_set = RetrievalDataset(config=config["dataset"], split='test', )
+    print(len(val_set))
 
     # if config['dataset']['random_split']:
     #     train_set, val_set, test_set = random_split(
     #         train_set, val_set, test_set, config['env']['seed'])
 
-    train_loader = DataLoader(train_set, batch_size=train_config['batch_size'], shuffle=True, collate_fn=collate_fn)
+    # train_loader = DataLoader(train_set, batch_size=train_config['batch_size'], shuffle=True, collate_fn=collate_fn)
     val_loader = DataLoader(val_set, batch_size=train_config['batch_size'], collate_fn=collate_fn)
-    test_loader = DataLoader(test_set, batch_size=train_config['batch_size'], collate_fn=collate_fn)
-
+    # test_loader = DataLoader(test_set, batch_size=train_config['batch_size'], collate_fn=collate_fn)
     # Build Model. Load ibtn, llms, cfre.
     ibtn = FineGrainedRetriever(config=config['retriever']['gnn'],
                                 filtering_strategy=algo_config['filtering'],
@@ -49,6 +48,7 @@ def main():
     trainable_params, all_param = cfre.trainable_params
     print(
         f"trainable params: {trainable_params} || all params: {all_param} || trainable%: {100 * trainable_params / all_param}")
+
 
     # Set up Optimizer.
     params = [p for _, p in cfre.named_parameters() if p.requires_grad]

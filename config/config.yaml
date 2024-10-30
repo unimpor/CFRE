@@ -1,9 +1,9 @@
 dataset:
   name: 'webqsp'
-  root: datasets
+  root: ./datasets
   emb_name: 'gte-large-en-v1.5'
   coarse_filter: True
-  coarse_num_or_ratio: 500
+  coarse_num_or_ratio: 300
   skip_no_path: True
 
 llms:
@@ -33,7 +33,7 @@ log:
 retriever:
   gnn:
     model_type: graphsage
-    topic_pe: true
+    topic_pe: False
     hidden_size: 512
     num_layers: 5
     aggr: 'mean'

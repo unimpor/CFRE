@@ -32,7 +32,7 @@ class SAGEConv(MessagePassing):
 class SAGE(nn.Module):
     def __init__(self,
                  emb_size,
-                 topic_pe,
+                 # topic_pe,
                  num_gnn_layers,
                  aggr):
         super().__init__()
@@ -40,7 +40,8 @@ class SAGE(nn.Module):
         self.gnn_layer_list = nn.ModuleList()
         for _ in range(num_gnn_layers):
             self.gnn_layer_list.append(SAGEConv(emb_size, aggr))
-        self.topic_pe = topic_pe
+        # TODO: Deprecated Function.
+        self.topic_pe = False
 
         # self.proj_reverse = nn.Sequential(
         #     nn.Linear(emb_size, emb_size),
@@ -54,17 +55,15 @@ class SAGE(nn.Module):
 
     def forward(self,
                 edge_index,
-                topic_entity_one_hot,
+                # topic_entity_one_hot,
                 h_e,
                 h_r,
                 **kwargs):
-        # TODO: werid...
-        # TODO: Consider put topic_entity_one_hot to fg_retriever or here?
-        if self.topic_pe:
-            h_e_list = [topic_entity_one_hot]
-        else:
-            h_e_list = []
-
+        # if self.topic_pe:
+        #     h_e_list = [topic_entity_one_hot]
+        # else:
+        #     h_e_list = []
+        h_e_list = []
         # num_edges = edge_index.shape[1]
         # h_q = h_q.expand(num_edges, -1)
 

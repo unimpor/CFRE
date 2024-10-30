@@ -30,7 +30,8 @@ class RetrievalDataset:
 
     @property
     def processed_file_names(self):
-        return opj(self.root, self.data_name, "processed", f"{self.split}_{self.filter_K}.pth")
+        filename = f"{self.split}_{self.filter_K}.pth" if self.coarse_filter else f"{self.split}.pth"
+        return opj(self.root, self.data_name, "processed", filename)
 
     def process(self, coarse_filter=True):
         # TODO: The following would be merged with `data_processing.py`
@@ -56,17 +57,13 @@ class RetrievalDataset:
             sample['relevant:shortest'] = self.scored_data[sample_id]['target_relevant_triples']
             # TODO: GPT-4 relevant info
             # sample['relevant:gpt-4'] = {}
-
-            # TODO: double check this
             if coarse_filter:
                 fh_id_list, fr_id_list, ft_id_list = [], [], []
 
-                # TODO: check `scored_triplets` is pre-sorted.
                 scored_triplets = self.scored_data[sample_id]['scored_triples']
                 assert len(scored_triplets) == len(sample["h_id_list"])
                 filtered_triplets = [(t[0], t[1], t[2]) for idx, t in enumerate(scored_triplets) if idx < self.filter_K]
 
-                # TODO: check if it is correct.
                 entity_list = sample['text_entity_list'] + sample['non_text_entity_list']
                 relation_list = sample['relation_list']
 

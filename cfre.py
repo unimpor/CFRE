@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from src.utils import PLACEHOLDER
 
 
@@ -15,32 +16,28 @@ class CFRE(nn.Module):
     def device(self):
         return list(self.parameters())[0].device
 
-    def __loss__(self, att):
+    def __loss__(self, attn_logtis, relevant_idx,):
         """
         Calculate attn-related loss
         return loss and loss_dict
         """
-        pass
-        # input: attn_score
-        # def get_r(decay_interval, decay_r, current_epoch, init_r=0.9, final_r=0.5):
-        #     r_ = init_r - current_epoch // decay_interval * decay_r
-        #     return final_r if r_ < final_r else r_
-
+        # Info loss: deprecated in K-sampling w.o. replacement
         # r = self.fix_r if self.fix_r else get_r(self.decay_interval, self.decay_r, epoch, self.init_r, self.final_r)
         # info_loss = (att * torch.log(att / r + 1e-6) + (1 - att) * torch.log((1 - att) / (1 - r + 1e-6) + 1e-6)).mean()
 
         # con_loss = None
         #
-        # dir_loss = None
-        #
-        # return info_loss + con_loss + dir_loss, {"info": info_loss.item(), "con": con_loss.item(), "dir": dir_loss.item()}
+        attn_target = attn_logtis[relevant_idx]
+        target = torch.ones_like(attn_target)
+        dir_loss = F.mse_loss(attn_target, target, reduction="mean")
+
+        return dir_loss, {"dir": dir_loss.item()}
 
     def forward_pass(self, batch):
-        # 1. post-extract batch-data items
-        triplets = batch.
         # 2. generate mask for the coarsely retrieved samples.
-        attns = self.ibtn(batch)
-        attn__loss, loss_dict = self.__loss__()  # calculate attn-related loss
+        edge_index, entity_embd, answer, edge_attr, triplets, relevant_idx, question, q_embd = batch
+        attn_logtis, attns = self.ibtn(entity_embd, edge_index, edge_attr, q_embd)
+        attn__loss, loss_dict = self.__loss__(attn_logtis, relevant_idx,)  # calculate attn-related loss
 
         # 3. generate filtered retrieval results
         batch_masked_triple_token_ids = self.mask_triplet(triplets, attns)
@@ -63,8 +60,8 @@ class CFRE(nn.Module):
         # Load the tokenizer
         assert len(triplets) == attns.shape[0]
 
-        # def triplet_to_str(triplet):
-        #     return f"({triplet[0]},{triplet[1]},{triplet[2]})"
+        def triplet_to_str(triplet):
+            return f"({triplet[0]},{triplet[1]},{triplet[2]})"
         # Tokenize each triplet string
 
         def create_hook(length, indices):
@@ -81,7 +78,7 @@ class CFRE(nn.Module):
             # In this strategy, just drop the unselected triplets.
             keep_idx = [idx for idx, score in enumerate(attns) if score.item() == 1]
 
-            tokenized_triplets = [self.llms.tokenizer(triplets[idx], return_tensors="pt")
+            tokenized_triplets = [self.llms.tokenizer(triplet_to_str(triplets[idx]), return_tensors="pt")
                                   for idx in keep_idx]
             triplets_token_ids = torch.cat(
                 [tokenized_triplet["input_ids"].squeeze() for tokenized_triplet in tokenized_triplets])
