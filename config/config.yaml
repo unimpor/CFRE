@@ -1,5 +1,5 @@
 dataset:
-  name: 'cwq'
+  name: 'webqsp'
   root: /home/comp/cscxliu/derek/CFRE/dataset
   emb_name: 'gte-large-en-v1.5'
   coarse_filter: True
@@ -37,7 +37,7 @@ retriever:
     hidden_size: 512
     num_layers: 5
     aggr: 'mean'
-    learn_non_text: True
+    learn_non_text: False
 
 algorithm:
   filtering: topk # "topk" or "idp-bern"

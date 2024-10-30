@@ -37,13 +37,13 @@ class CFRE(nn.Module):
 
     def forward_pass(self, batch):
         # 1. post-extract batch-data items
-
+        triplets = batch.
         # 2. generate mask for the coarsely retrieved samples.
         attns = self.ibtn(batch)
         attn__loss, loss_dict = self.__loss__()  # calculate attn-related loss
 
         # 3. generate filtered retrieval results
-        batch_masked_triple_token_ids = [self.mask_triplet(triplets, attn) for (triplets, attn) in zip()]
+        batch_masked_triple_token_ids = self.mask_triplet(triplets, attns)
 
         # 4. LLM supervisions
         outputs = self.llms.forward_pass(batch_masked_triple_token_ids)
@@ -51,7 +51,7 @@ class CFRE(nn.Module):
         loss_dict["predict"] = outputs.loss.item()
         return loss, loss_dict
 
-    def mask_triplet(self, triplets, attn, ):
+    def mask_triplet(self, triplets, attns, ):
         """
         `strategy` can be set as "drop" or "mask", "drop" as default.
         Mask tokenized triplets using attn
@@ -61,10 +61,10 @@ class CFRE(nn.Module):
         # Example: triplets converted into strings
 
         # Load the tokenizer
-        assert len(triplets) == attn.shape[0]
+        assert len(triplets) == attns.shape[0]
 
-        def triplet_to_str(triplet):
-            return f"({triplet[0]},{triplet[1]},{triplet[2]})"
+        # def triplet_to_str(triplet):
+        #     return f"({triplet[0]},{triplet[1]},{triplet[2]})"
         # Tokenize each triplet string
 
         def create_hook(length, indices):
@@ -79,9 +79,9 @@ class CFRE(nn.Module):
 
         if self.strategy == "drop":
             # In this strategy, just drop the unselected triplets.
-            keep_idx = [idx for idx, score in enumerate(attn) if score.item() == 1]
+            keep_idx = [idx for idx, score in enumerate(attns) if score.item() == 1]
 
-            tokenized_triplets = [self.llms.tokenizer(triplet_to_str(triplets[idx]), return_tensors="pt")
+            tokenized_triplets = [self.llms.tokenizer(triplets[idx], return_tensors="pt")
                                   for idx in keep_idx]
             triplets_token_ids = torch.cat(
                 [tokenized_triplet["input_ids"].squeeze() for tokenized_triplet in tokenized_triplets])
@@ -90,23 +90,23 @@ class CFRE(nn.Module):
                                tokenized_triplets]
             # TODO: we may consider batch size > 1
             if self.grad_normalize:
-                attn.register_hook(create_hook(lengths=triplet_lengths, indices=keep_idx))
+                attns.register_hook(create_hook(lengths=triplet_lengths, indices=keep_idx))
 
             attns = torch.cat([
-                attn[idx].expand(length) for idx, length in zip(keep_idx, triplet_lengths)
+                attns[idx].expand(length) for idx, length in zip(keep_idx, triplet_lengths)
             ])  # expand and cut.
 
             masked_token_ids = attns * triplets_token_ids
 
         elif self.strategy == "mask":
             tokenized_triplets = [self.llms.tokenizer(triplet_to_str(triplet), return_tensors="pt")
-                                  for (triplet, score) in zip(triplets, attn)]
+                                  for (triplet, score) in zip(triplets, attns)]
             triplets_token_ids = torch.cat(
                 [tokenized_triplet["input_ids"].squeeze() for tokenized_triplet in tokenized_triplets])
 
             # Get the lengths of the tokenized triplets (number of tokens in each triplet)
             triplet_lengths = [len(tokenized_triplet["input_ids"].squeeze()) for tokenized_triplet in tokenized_triplets]
-            masks = torch.cat([attn[i].expand(triplet_lengths[i]) for i in range(len(attn))])
+            masks = torch.cat([attns[i].expand(triplet_lengths[i]) for i in range(len(attns))])
 
             mu = self.llms.tokenizer.encode(PLACEHOLDER, add_special_tokens=False)[0]  # Using the [MASK] token's ID
             # Create a placeholder tensor with the same length as concatenated token IDs

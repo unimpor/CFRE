@@ -13,7 +13,7 @@ from src.datasets import RetrievalDataset
 
 def main():
     parser = argparse.ArgumentParser(description='CFRE')
-    parser.add_argument('--dataset', type=str, help='dataset used, option: ')
+    parser.add_argument('--dataset', type=str, default="webqsp", help='dataset used, option: ')
     parser.add_argument('--cuda', type=int, help='cuda device id, -1 for cpu')
     parser.add_argument('--config_path', type=str, help='path of config file')
     args = parser.parse_args()

@@ -18,7 +18,6 @@ class RetrievalDataset:
         self.coarse_filter = config["coarse_filter"]
         self.data = self._load_data(opj(self.root, self.data_name, "data", f"{self.split}.pkl"))
         # which contains some coarse retrieval results and shorted-path relevant info
-        # TODO: ask mufei which file we should use from
         self.scored_data = self._load_data(opj(self.root, self.data_name, "scored", f"{self.split}.pkl"))
         # 'target_relevant_triples' 'scored_triples'
 
@@ -38,7 +37,6 @@ class RetrievalDataset:
         processed_data = []
         for sample in self.data:
             sample_id = sample['id']
-            #  TODO: `skip_no_path`. If we should use shortest-relevant as explicit supervisory signal.
             if self.config['skip_no_path'] and (self.scored_data[sample_id]['max_path_length'] in [None, 0]):
                 continue
 

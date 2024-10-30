@@ -44,7 +44,6 @@ class LLMs(nn.Module):
         Calculate prediction loss given post-processed retrival contents.
         """
 
-        batch_size =
         question =
         label =
 

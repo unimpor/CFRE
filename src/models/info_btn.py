@@ -52,7 +52,8 @@ class FineGrainedRetriever(nn.Module):
     def forward(self, batch):
         h_id_tensor, r_id_tensor, t_id_tensor, q_emb, entity_embs, \
             num_non_text_entities, relation_embs, topic_entity_one_hot, _ = batch
-
+        # TODO: Here we need to insert a func to identify triplet string
+        # h-id / t-id is
         device = entity_embs.device
 
         edge_index = torch.stack([h_id_tensor, t_id_tensor], dim=0)
@@ -101,7 +102,7 @@ class FineGrainedRetriever(nn.Module):
         ], dim=1)
         # attention logits for each triplet.
         attn_logtis = self.pred(h_triple)
-        return self.sampling(attn_logtis)
+        return attn_logtis, self.sampling(attn_logtis), triplets
 
     def sampling(self, att_log_logit, temp=1, training=True):
         """
