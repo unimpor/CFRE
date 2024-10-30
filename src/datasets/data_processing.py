@@ -64,18 +64,19 @@ if __name__ == "__main__":
         edge_index_org = np.stack([fh_id_list, ft_id_list], axis=0)
         edge_index = np.vectorize(idx_mapping.get)(edge_index_org)
         # TODO: q-entity, q-entity-in-graph, a-entity-in-graph
+        # TODO: we may need a topic-entity-index
         processed_sample = {
             "edge_index": edge_index,
             "x": entity_embeddings,
-            "y": scored_data['a_entity_in_graph'],
+            "y": scored_data['a_entity_in_graph'],  # TODO: here we use `in-graph` as signal
             "edge_attr": edge_attr,
             "triplets": filtered_triplets,
             'relevant_idx': relevant_ids,
             "id": sample_id,
             "q": sample['question'],
             "q_embd": sample_embd['q_emb'],
+            "q_entity_idx": []
         }
         processed_data.append(processed_sample)
-        break
 
     torch.save(processed_data, "../samples/processed_webqsp_val.pth")
