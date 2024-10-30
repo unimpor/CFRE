@@ -16,6 +16,7 @@ class RetrievalDataset:
         self.root = config['root']
         self.data_name = config['name']
         self.coarse_filter = config["coarse_filter"]
+        self.filter_K = self.config["coarse_num_or_ratio"]  # First try 300.
         self.data = self._load_data(opj(self.root, self.data_name, "data", f"{self.split}.pkl"))
         # which contains some coarse retrieval results and shorted-path relevant info
         self.scored_data = self._load_data(opj(self.root, self.data_name, "scored", f"{self.split}.pkl"))
@@ -27,13 +28,14 @@ class RetrievalDataset:
 
     @property
     def processed_file_names(self):
-        return opj(self.root, self.data_name, "processed", f"{self.split}.pth")
+        return opj(self.root, self.data_name, "processed", f"{self.split}_{self.filter_K}.pth")
 
     def process(self, coarse_filter=True):
 
         if os.path.exists(self.processed_file_names):
             return torch.load(self.processed_file_names)
 
+        # TODO: The following would be merged with `data_processing.py`
         processed_data = []
         for sample in self.data:
             sample_id = sample['id']
@@ -60,11 +62,11 @@ class RetrievalDataset:
             # TODO: double check this
             if coarse_filter:
                 fh_id_list, fr_id_list, ft_id_list = [], [], []
-                filter_K = self.config["coarse_num_or_ratio"]
+
                 # TODO: check `scored_triplets` is pre-sorted.
                 scored_triplets = self.scored_data[sample_id]['scored_triples']
                 assert len(scored_triplets) == len(sample["h_id_list"])
-                filtered_triplets = [(t[0], t[1], t[2]) for idx, t in enumerate(scored_triplets) if idx < filter_K]
+                filtered_triplets = [(t[0], t[1], t[2]) for idx, t in enumerate(scored_triplets) if idx < self.filter_K]
 
                 # TODO: check if it is correct.
                 entity_list = sample['text_entity_list'] + sample['non_text_entity_list']
@@ -76,7 +78,7 @@ class RetrievalDataset:
                         fh_id_list.append(h_id)
                         fr_id_list.append(r_id)
                         ft_id_list.append(t_id)
-                assert len(fh_id_list) == len(fr_id_list) == len(ft_id_list) == filter_K
+                assert len(fh_id_list) == len(fr_id_list) == len(ft_id_list) == self.filter_K
                 sample['h_id_list'], sample['r_id_list'], sample['t_id_list'] = fh_id_list, fr_id_list, ft_id_list
 
             processed_data.append(sample)

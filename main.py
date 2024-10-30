@@ -14,8 +14,8 @@ from src.datasets import RetrievalDataset
 def main():
     parser = argparse.ArgumentParser(description='CFRE')
     parser.add_argument('--dataset', type=str, default="webqsp", help='dataset used, option: ')
-    parser.add_argument('--cuda', type=int, help='cuda device id, -1 for cpu')
-    parser.add_argument('--config_path', type=str, help='path of config file')
+    parser.add_argument('--cuda', type=int, default=0, help='cuda device id, -1 for cpu')
+    parser.add_argument('--config_path', type=str, default="./config/config.yaml", help='path of config file')
     args = parser.parse_args()
 
     config = yaml.safe_load(args.config_path)
@@ -31,7 +31,6 @@ def main():
     val_set = RetrievalDataset(config=config["dataset"], split='val', )
     test_set = RetrievalDataset(config=config["dataset"], split='test', )
 
-    # TODO: if we need to follow random splits
     # if config['dataset']['random_split']:
     #     train_set, val_set, test_set = random_split(
     #         train_set, val_set, test_set, config['env']['seed'])

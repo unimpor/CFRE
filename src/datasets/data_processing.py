@@ -29,11 +29,12 @@ if __name__ == "__main__":
         # filtered_triplets = [(t[0], t[1], t[2]) for idx, t in enumerate(scored_triplets) if idx < FILTER_K]
         filter_k = min(FILTER_K, len(scored_triplets))
         filtered_triplets = scored_triplets[:filter_k]
+        filtered_triplets = [(h, r, t) for (h, r, t, _) in filtered_triplets]
         # Find preserved (h,r,t) id.
         entity_list = sample['text_entity_list'] + sample['non_text_entity_list']
         relation_list = sample['relation_list']
 
-        for (h, r, t, _) in filtered_triplets:
+        for (h, r, t) in filtered_triplets:
             fh_id_list.append(entity_list.index(h))
             fr_id_list.append(relation_list.index(r))
             ft_id_list.append(entity_list.index(t))
@@ -43,9 +44,11 @@ if __name__ == "__main__":
         #         fh_id_list.append(h_id)
         #         fr_id_list.append(r_id)
         #         ft_id_list.append(t_id)
-        relevant_ids = [filtered_triplets.index(tp) for tp in scored_data['target_relevant_triples'] if tp in filtered_triplets]
-        if len(relevant_ids) < len(scored_data['target_relevant_triples']):
-            print(f"Relevant info is missing from coarse retrieval: {sample_id}")
+        num_relevant_org = len(scored_sample['target_relevant_triples'])
+        relevant_ids = [filtered_triplets.index(tp) for tp in scored_sample['target_relevant_triples'] if
+                        tp in filtered_triplets]
+        missing_rat = (num_relevant_org - len(relevant_ids)) / num_relevant_org
+        print(f"Relevant info is missing {missing_rat} from coarse retrieval: {sample_id}")
 
         assert len(fh_id_list) == len(fr_id_list) == len(ft_id_list) == filter_k
 
@@ -62,21 +65,23 @@ if __name__ == "__main__":
         # 3. edge index, from old idx to new idx
         idx_mapping = {old_idx: new_idx for new_idx, old_idx in enumerate(selected_nodes)}
         edge_index_org = np.stack([fh_id_list, ft_id_list], axis=0)
-        edge_index = np.vectorize(idx_mapping.get)(edge_index_org)
+        edge_index = torch.from_numpy(np.vectorize(idx_mapping.get)(edge_index_org))
         # TODO: q-entity, q-entity-in-graph, a-entity-in-graph
         # TODO: we may need a topic-entity-index
+        assert torch.all(torch.eq(entity_embeddings_org[edge_index_org[0, :]],
+                                  entity_embeddings[edge_index[0, :]]))
         processed_sample = {
             "edge_index": edge_index,
-            "x": entity_embeddings,
-            "y": scored_data['a_entity_in_graph'],  # TODO: here we use `in-graph` as signal
+            "entity_embd": entity_embeddings,
+            "y": scored_sample['a_entity_in_graph'],  # TODO: here we use `in-graph` as signal
             "edge_attr": edge_attr,
             "triplets": filtered_triplets,
             'relevant_idx': relevant_ids,
             "id": sample_id,
             "q": sample['question'],
             "q_embd": sample_embd['q_emb'],
-            "q_entity_idx": []
+            # "q_entity_idx": []
         }
         processed_data.append(processed_sample)
 
-    torch.save(processed_data, "../samples/processed_webqsp_val.pth")
+    torch.save(processed_data, f"../samples/processed_webqsp_val_{FILTER_K}.pth")
