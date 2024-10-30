@@ -1,6 +1,6 @@
 dataset:
   name: 'webqsp'
-  root: /home/comp/cscxliu/derek/CFRE/dataset
+  root: datasets
   emb_name: 'gte-large-en-v1.5'
   coarse_filter: True
   coarse_num_or_ratio: 500

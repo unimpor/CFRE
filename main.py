@@ -21,9 +21,9 @@ def main():
     config = yaml.safe_load(args.config_path)
     train_config = config['train']
     algo_config = config['algorithm']
-    wandb.init(project=f"",
-               name=f"",
-               config=config)
+    # wandb.init(project=f"",
+    #            name=f"",
+    #            config=config)
 
     set_seed(config['env']['seed'])
 
