@@ -43,7 +43,7 @@ class CFRE(nn.Module):
         batch_masked_triple_token_ids = self.mask_triplet(triplets, attns)
 
         # 4. LLM supervisions
-        outputs = self.llms.forward_pass(batch_masked_triple_token_ids)
+        outputs = self.llms.forward_pass(batch_masked_triple_token_ids, question, answer)
         loss = attn__loss + outputs.loss
         loss_dict["predict"] = outputs.loss.item()
         return loss, loss_dict

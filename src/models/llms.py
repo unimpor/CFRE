@@ -9,6 +9,7 @@ from src.utils import FORMER, LATTER, LABEL
 
 IGNORE_INDEX = -100
 
+
 class LLMs(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -19,7 +20,8 @@ class LLMs(nn.Module):
             "revision": "main",
         }
 
-        self.tokenizer = AutoTokenizer.from_pretrained(config['llm_model_path'], use_fast=False, revision=kwargs["revision"])
+        self.tokenizer = AutoTokenizer.from_pretrained(config['llm_model_path'], use_fast=False,
+                                                       revision=kwargs["revision"])
         self.tokenizer.pad_token_id = 0
         self.tokenizer.padding_side = 'left'
 
@@ -39,15 +41,13 @@ class LLMs(nn.Module):
 
         self.model = model
 
-    def forward_pass(self, bm_triplet_ids, batch_sample):
+    def forward_pass(self, bm_triplet_ids, question, label):
         """
         Calculate prediction loss given post-processed retrival contents.
         """
 
-        question =
-        label =
-
         # TODO: batch-wise prompt. Now this is sample-wise
+        batch_size = len(question)
         former_pmt = FORMER
         latter_pmt = LATTER.format(question=question)
         label_pmt = LABEL.format(label=label)
@@ -60,7 +60,8 @@ class LLMs(nn.Module):
         for i in range(batch_size):
             label_ids = label_pmt_ids.input_ids[i]
             # TODO: if we should keep `self.max_txt_len`
-            input_ids = former_pmt_ids.input_ids[i] + bm_triplet_ids.input_ids[i][:self.max_txt_len] + latter_pmt_ids.input_ids[i] + label_ids
+            input_ids = former_pmt_ids.input_ids[i] + bm_triplet_ids.input_ids[i][:self.max_txt_len] + \
+                        latter_pmt_ids.input_ids[i] + label_ids
             inputs_embeds = self.word_embedding(torch.tensor(input_ids).to(self.model.device))
             batch_inputs_embeds.append(inputs_embeds)
             batch_attention_mask.append([1] * inputs_embeds.shape[0])
@@ -71,7 +72,7 @@ class LLMs(nn.Module):
         pad_embeds = self.word_embedding(torch.tensor(self.tokenizer.pad_token_id)).unsqueeze(0)
 
         for i in range(batch_size):
-            pad_length = max_length-batch_inputs_embeds[i].shape[0]
+            pad_length = max_length - batch_inputs_embeds[i].shape[0]
             batch_inputs_embeds[i] = torch.cat([pad_embeds.repeat(pad_length, 1), batch_inputs_embeds[i]])
             batch_attention_mask[i] = [0] * pad_length + batch_attention_mask[i]
             batch_label_input_ids[i] = [self.ignore_idx] * pad_length + batch_label_input_ids[i]
