@@ -34,14 +34,14 @@ retriever:
   gnn:
     model_type: graphsage
     topic_pe: False
-    hidden_size: 512
+    hidden_size: 1024
     num_layers: 5
     aggr: 'mean'
     learn_non_text: False
 
 algorithm:
   filtering: topk # "topk" or "idp-bern"
-  filtering_num_or_ratio: 500 # int or float
+  filtering_num_or_ratio: 50 # int or float
   triplet2text: drop # "drop" or "mask"
   grad_normalize: True
 

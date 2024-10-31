@@ -3,7 +3,7 @@ This file is temporarily not useful.
 """
 import torch
 import torch.nn as nn
-from gnn import SAGE, SAGEConv
+from src.models.gnn import SAGE
 from src.utils import gumbel_topk
 
 
@@ -88,7 +88,7 @@ class FineGrainedRetriever(nn.Module):
             h_e[t_id_tensor]
         ], dim=1)
         # attention logits for each triplet.
-        attn_logtis = self.pred(h_triple)
+        attn_logtis = self.pred(h_triple).squeeze()
         return attn_logtis, self.sampling(attn_logtis)
 
     def sampling(self, att_log_logit, temp=1, training=True):

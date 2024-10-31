@@ -32,7 +32,7 @@ class SAGEConv(MessagePassing):
 class SAGE(nn.Module):
     def __init__(self,
                  emb_size,
-                 # topic_pe,
+                 topic_pe,
                  num_gnn_layers,
                  aggr):
         super().__init__()
@@ -41,7 +41,7 @@ class SAGE(nn.Module):
         for _ in range(num_gnn_layers):
             self.gnn_layer_list.append(SAGEConv(emb_size, aggr))
         # TODO: Deprecated Function.
-        self.topic_pe = False
+        self.topic_pe = topic_pe
 
         # self.proj_reverse = nn.Sequential(
         #     nn.Linear(emb_size, emb_size),

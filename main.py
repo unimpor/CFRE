@@ -36,15 +36,16 @@ def main():
     #         train_set, val_set, test_set, config['env']['seed'])
 
     # train_loader = DataLoader(train_set, batch_size=train_config['batch_size'], shuffle=True, collate_fn=collate_fn)
-    val_loader = DataLoader(val_set, batch_size=train_config['batch_size'], collate_fn=collate_fn)
+    train_loader = DataLoader(val_set, batch_size=train_config['batch_size'], collate_fn=collate_fn)
     # test_loader = DataLoader(test_set, batch_size=train_config['batch_size'], collate_fn=collate_fn)
     # Build Model. Load ibtn, llms, cfre.
     ibtn = FineGrainedRetriever(config=config['retriever']['gnn'],
                                 filtering_strategy=algo_config['filtering'],
                                 filtering_num_or_ratio=algo_config['filtering_num_or_ratio']
                                 )
-    llms = LLMs(config['llms'])
-    cfre = CFRE(fg_retriever=ibtn, llm_model=llms, args=config['algorithm'])
+    # llms = LLMs(config['llms'])
+    llms = None
+    cfre = CFRE(fg_retriever=ibtn, llm_model=llms, config=config['algorithm'])
     trainable_params, all_param = cfre.trainable_params
     print(
         f"trainable params: {trainable_params} || all params: {all_param} || trainable%: {100 * trainable_params / all_param}")
@@ -58,11 +59,10 @@ def main():
     )
 
     # Step 5. Training one epoch and batch
-
-    num_training_steps = args.num_epochs * len(train_loader)
+    # num_training_steps = args.num_epochs * len(train_loader)
     best_val_loss = float('inf')
 
-    for epoch in tqdm(range(args.num_epochs)):
+    for epoch in tqdm(range(train_config['num_epochs'])):
 
         cfre.train()
         epoch_loss, accum_loss = 0., 0.
@@ -76,8 +76,8 @@ def main():
             # from G-Retriever
             clip_grad_norm_(optimizer.param_groups[0]['params'], 0.1)
 
-            if (step + 1) % args.grad_steps == 0:
-                adjust_learning_rate(optimizer.param_groups[0], args.lr, step / len(train_loader) + epoch, args)
+            # if (step + 1) % args.grad_steps == 0:
+            #     adjust_learning_rate(optimizer.param_groups[0], args.lr, step / len(train_loader) + epoch, args)
 
             optimizer.step()
             epoch_loss, accum_loss = epoch_loss + loss.item(), accum_loss + loss.item()

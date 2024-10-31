@@ -8,10 +8,10 @@ import numpy as np
 FILTER_K = 300
 
 if __name__ == "__main__":
-    raw_data = pickle.load(open("../samples/webqsp_val_raw.pkl", "rb"))
-    scored_data = torch.load("../samples/webqsp_241028_val.pth")
-    embedding1 = torch.load("../samples/0.pth")
-    embedding2 = torch.load("../samples/1.pth")
+    raw_data = pickle.load(open("samples/webqsp_val_raw.pkl", "rb"))
+    scored_data = torch.load("samples/webqsp_241028_val.pth")
+    embedding1 = torch.load("samples/0.pth")
+    embedding2 = torch.load("samples/1.pth")
     embeddings = {**embedding1, **embedding2}
     processed_data = []
     for sample in raw_data:
@@ -65,7 +65,7 @@ if __name__ == "__main__":
         # 3. edge index, from old idx to new idx
         idx_mapping = {old_idx: new_idx for new_idx, old_idx in enumerate(selected_nodes)}
         edge_index_org = np.stack([fh_id_list, ft_id_list], axis=0)
-        edge_index = torch.from_numpy(np.vectorize(idx_mapping.get)(edge_index_org))
+        edge_index = torch.tensor(np.vectorize(idx_mapping.get)(edge_index_org), dtype=torch.int64)
         # TODO: q-entity, q-entity-in-graph, a-entity-in-graph
         # TODO: we may need a topic-entity-index
         assert torch.all(torch.eq(entity_embeddings_org[edge_index_org[0, :]],
@@ -84,4 +84,4 @@ if __name__ == "__main__":
         }
         processed_data.append(processed_sample)
 
-    torch.save(processed_data, f"../samples/processed_webqsp_val_{FILTER_K}.pth")
+    torch.save(processed_data, f"samples/processed_webqsp_val_{FILTER_K}.pth")
