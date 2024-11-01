@@ -16,7 +16,7 @@ class LLMs(nn.Module):
 
         kwargs = {
             # "max_memory": {0: '80GiB'},
-            "device_map": "cuda:0",
+            "device_map": config['device'],
             "revision": "main",
         }
 

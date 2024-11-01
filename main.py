@@ -17,7 +17,7 @@ def main():
     parser.add_argument('--device', type=int, default=0, help='cuda device id, -1 for cpu')
     parser.add_argument('--config_path', type=str, default="./config/config.yaml", help='path of config file')
     args = parser.parse_args()
-    device = torch.device(f'cuda:{args.device}')
+    device = torch.device(config['env']['device'])
     config = yaml.safe_load(open(args.config_path, 'r'))
     train_config = config['train']
     algo_config = config['algorithm']
