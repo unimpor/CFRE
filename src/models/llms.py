@@ -15,8 +15,8 @@ class LLMs(nn.Module):
         super().__init__()
 
         kwargs = {
-            # "max_memory": {0: '80GiB', 1: '80GiB'},
-            "device_map": "auto",
+            # "max_memory": {0: '80GiB'},
+            "device_map": "cuda:0",
             "revision": "main",
         }
 
@@ -27,60 +27,72 @@ class LLMs(nn.Module):
 
         self.ignore_idx = IGNORE_INDEX  # not as supervision signal
 
+        # Note torch.dtype
         model = AutoModelForCausalLM.from_pretrained(
             config['llm_model_path'],
-            torch_dtype=torch.float16,
+            torch_dtype=torch.float32,
             low_cpu_mem_usage=True,
             **kwargs
         )
 
-        if config['llm_frozen'] == 'True':
+        if config['llm_frozen'] is True:
             print("Freezing LLAMA!")
             for name, param in model.named_parameters():
                 param.requires_grad = False
 
         self.model = model
+        self.word_embedding = self.model.model.get_input_embeddings()
 
-    def forward_pass(self, bm_triplet_ids, question, label):
+    def forward_pass(self, attns, bm_triplet_ids, question, label):
         """
         Calculate prediction loss given post-processed retrival contents.
         """
 
         # TODO: batch-wise prompt. Now this is sample-wise
-        batch_size = len(question)
+        label = "[" + ", ".join(label) + "]"
+        batch_size = 1
         former_pmt = FORMER
         latter_pmt = LATTER.format(question=question)
         label_pmt = LABEL.format(label=label)
 
-        former_pmt_ids = self.tokenizer(former_pmt, add_special_tokens=False)
-        latter_pmt_ids = self.tokenizer(latter_pmt, add_special_tokens=False)
-        label_pmt_ids = self.tokenizer(label_pmt, add_special_tokens=False)
+        former_pmt_ids = self.tokenizer(former_pmt, add_special_tokens=False)["input_ids"]
+        latter_pmt_ids = self.tokenizer(latter_pmt, add_special_tokens=False)["input_ids"]
+        label_pmt_ids = self.tokenizer(label_pmt, add_special_tokens=False)["input_ids"]
 
         batch_inputs_embeds, batch_attention_mask, batch_label_input_ids = [], [], []
         for i in range(batch_size):
-            label_ids = label_pmt_ids.input_ids[i]
+            # label_ids = label_pmt_ids["input_ids"]
             # TODO: if we should keep `self.max_txt_len`
-            input_ids = former_pmt_ids.input_ids[i] + bm_triplet_ids.input_ids[i][:self.max_txt_len] + \
-                        latter_pmt_ids.input_ids[i] + label_ids
-            inputs_embeds = self.word_embedding(torch.tensor(input_ids).to(self.model.device))
+            # input_ids = former_pmt_ids["input_ids"][i] + bm_triplet_ids["input_ids"][i][:self.max_txt_len] + \
+                        # latter_pmt_ids["input_ids"][i] + label_ids
+            # input_ids = former_pmt_ids["input_ids"] + bm_triplet_ids.tolist() + latter_pmt_ids["input_ids"] + label_ids
+            # inputs_embeds = self.word_embedding(torch.tensor(input_ids).to(self.model.device))
+            former_pmt_embeds = self.word_embedding(torch.tensor(former_pmt_ids).to(self.model.device))
+            bm_triplet_embeds = attns * self.word_embedding(bm_triplet_ids.to(self.model.device))
+            latter_pmt_embeds = self.word_embedding(torch.tensor(latter_pmt_ids + label_pmt_ids).to(self.model.device))
+            # TODO: combine with attns
+            inputs_embeds = torch.concat([former_pmt_embeds, 
+                                          bm_triplet_embeds, 
+                                          latter_pmt_embeds], dim=0)
             batch_inputs_embeds.append(inputs_embeds)
             batch_attention_mask.append([1] * inputs_embeds.shape[0])
-            label_input_ids = [self.ignore_idx] * (inputs_embeds.shape[0] - len(label_ids)) + label_ids
+            label_input_ids = [self.ignore_idx] * (inputs_embeds.shape[0] - len(label_pmt_ids)) + label_pmt_ids
             batch_label_input_ids.append(label_input_ids)
+            
+        # TODO: deprecated feature when batch size = 1.
+        # max_length = max([x.shape[0] for x in batch_inputs_embeds])
+        # pad_embeds = self.word_embedding(torch.tensor(self.tokenizer.pad_token_id)).unsqueeze(0)
 
-        max_length = max([x.shape[0] for x in batch_inputs_embeds])
-        pad_embeds = self.word_embedding(torch.tensor(self.tokenizer.pad_token_id)).unsqueeze(0)
-
-        for i in range(batch_size):
-            pad_length = max_length - batch_inputs_embeds[i].shape[0]
-            batch_inputs_embeds[i] = torch.cat([pad_embeds.repeat(pad_length, 1), batch_inputs_embeds[i]])
-            batch_attention_mask[i] = [0] * pad_length + batch_attention_mask[i]
-            batch_label_input_ids[i] = [self.ignore_idx] * pad_length + batch_label_input_ids[i]
+        # for i in range(batch_size):
+        #     pad_length = max_length - batch_inputs_embeds[i].shape[0]
+        #     batch_inputs_embeds[i] = torch.cat([pad_embeds.repeat(pad_length, 1), batch_inputs_embeds[i]])
+        #     batch_attention_mask[i] = [0] * pad_length + batch_attention_mask[i]
+        #     batch_label_input_ids[i] = [self.ignore_idx] * pad_length + batch_label_input_ids[i]
 
         inputs_embeds = torch.stack(batch_inputs_embeds, dim=0).to(self.model.device)
         attention_mask = torch.tensor(batch_attention_mask).to(self.model.device)
         label_input_ids = torch.tensor(batch_label_input_ids).to(self.model.device)
-
+        
         outputs = self.model(
             inputs_embeds=inputs_embeds,
             attention_mask=attention_mask,

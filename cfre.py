@@ -36,15 +36,17 @@ class CFRE(nn.Module):
     def forward_pass(self, batch):
         # 2. generate mask for the coarsely retrieved samples.
         edge_index, entity_embd, answer, edge_attr, triplets, relevant_idx, question, q_embd = batch
+        edge_index, entity_embd, edge_attr, q_embd = edge_index.to(self.device), entity_embd.to(self.device), edge_attr.to(self.device), q_embd.to(self.device)
         attn_logtis, attns = self.ibtn(entity_embd, edge_index, edge_attr, q_embd)
-        attn__loss, loss_dict = self.__loss__(attn_logtis, relevant_idx,)  # calculate attn-related loss
-
+        attn_loss, loss_dict = self.__loss__(attn_logtis, relevant_idx,)  # calculate attn-related loss
         # 3. generate filtered retrieval results
-        batch_masked_triple_token_ids = self.mask_triplet(triplets, attns)
-
+        assert len(triplets) == len(attns)
+        # batch_masked_triple_token_ids = self.mask_triplet(triplets, attns)
+        attns, triplets_token_ids = self.mask_triplet(triplets, attns)
         # 4. LLM supervisions
-        outputs = self.llms.forward_pass(batch_masked_triple_token_ids, question, answer)
-        loss = attn__loss + outputs.loss
+        # outputs = self.llms.forward_pass(batch_masked_triple_token_ids, question, answer)
+        outputs = self.llms.forward_pass(attns, triplets_token_ids, question, answer)
+        loss = attn_loss + outputs.loss
         loss_dict["predict"] = outputs.loss.item()
         return loss, loss_dict
 
@@ -77,22 +79,22 @@ class CFRE(nn.Module):
         if self.strategy == "drop":
             # In this strategy, just drop the unselected triplets.
             keep_idx = [idx for idx, score in enumerate(attns) if score.item() == 1]
-
+            
             tokenized_triplets = [self.llms.tokenizer(triplet_to_str(triplets[idx]), return_tensors="pt")
                                   for idx in keep_idx]
             triplets_token_ids = torch.cat(
-                [tokenized_triplet["input_ids"].squeeze() for tokenized_triplet in tokenized_triplets])
+                [tokenized_triplet["input_ids"].squeeze() for tokenized_triplet in tokenized_triplets]).to(self.device)
 
             triplet_lengths = [len(tokenized_triplet["input_ids"].squeeze()) for tokenized_triplet in
                                tokenized_triplets]
             # TODO: we may consider batch size > 1
             if self.grad_normalize:
-                attns.register_hook(create_hook(lengths=triplet_lengths, indices=keep_idx))
+                attns.register_hook(create_hook(length=triplet_lengths, indices=keep_idx))
 
             attns = torch.cat([
                 attns[idx].expand(length) for idx, length in zip(keep_idx, triplet_lengths)
-            ])  # expand and cut.
-
+            ]).unsqueeze(1)  # expand and cut.
+            # assert attns.shape == triplets_token_ids.shape
             masked_token_ids = attns * triplets_token_ids
 
         elif self.strategy == "mask":
@@ -113,8 +115,8 @@ class CFRE(nn.Module):
 
         else:
             raise NotImplementedError
-
-        return masked_token_ids
+        return attns, triplets_token_ids
+        # return masked_token_ids
 
     @property
     def trainable_params(self):

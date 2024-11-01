@@ -14,10 +14,10 @@ from src.datasets import RetrievalDataset
 def main():
     parser = argparse.ArgumentParser(description='CFRE')
     parser.add_argument('--dataset', type=str, default="webqsp", help='dataset used, option: ')
-    parser.add_argument('--cuda', type=int, default=0, help='cuda device id, -1 for cpu')
+    parser.add_argument('--device', type=int, default=0, help='cuda device id, -1 for cpu')
     parser.add_argument('--config_path', type=str, default="./config/config.yaml", help='path of config file')
     args = parser.parse_args()
-
+    device = torch.device(f'cuda:{args.device}')
     config = yaml.safe_load(open(args.config_path, 'r'))
     train_config = config['train']
     algo_config = config['algorithm']
@@ -42,10 +42,9 @@ def main():
     ibtn = FineGrainedRetriever(config=config['retriever']['gnn'],
                                 filtering_strategy=algo_config['filtering'],
                                 filtering_num_or_ratio=algo_config['filtering_num_or_ratio']
-                                )
-    # llms = LLMs(config['llms'])
-    llms = None
-    cfre = CFRE(fg_retriever=ibtn, llm_model=llms, config=config['algorithm'])
+                                ).to(device)
+    llms = LLMs(config['llms'])
+    cfre = CFRE(fg_retriever=ibtn, llm_model=llms, config=config['algorithm']).to(device)
     trainable_params, all_param = cfre.trainable_params
     print(
         f"trainable params: {trainable_params} || all params: {all_param} || trainable%: {100 * trainable_params / all_param}")
