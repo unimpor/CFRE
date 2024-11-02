@@ -40,8 +40,13 @@ class CFRE(nn.Module):
         graph, answer, triplets, relevant_idx, question, q_embd = batch["graph"], batch["y"], \
                                             batch["triplets"], batch["relevant_idx"], batch["q"], batch["q_embd"]
         graph = graph.to(self.device)
-
-        attn_logtis, attns = self.ibtn(graph, q_embd)
+        
+        edges_per_graph = [len(triplets[i]) for i in range(graph.num_graphs)]
+        batch_q_embd = torch.cat([q_embd[i].to(self.device).expand(edges_per_graph[i], -1) for i in range(graph.num_graphs)])
+        
+        batch_idx = graph.batch
+        attn_logtis, attns = self.ibtn(graph, batch_q_embd)
+        input("success!")
         attn_loss, loss_dict = self.__loss__(attn_logtis, relevant_idx,)  # calculate attn-related loss
         # 3. generate filtered retrieval results
         assert len(triplets) == len(attns)

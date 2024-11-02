@@ -51,7 +51,11 @@ class FineGrainedRetriever(nn.Module):
             nn.Linear(emb_size, emb_size)
         )
 
-    def forward(self, batch, q_embd):
+    @property
+    def device(self):
+        return list(self.parameters())[0].device
+    
+    def forward(self, batch, batch_q_embds):
         # TODO: Currently deprecate two Functions, `non_text_entity_embd` and `topic_entity_onehot`
         # if self.non_text_entity_emb is None:
         #     h_e = torch.cat([
@@ -67,25 +71,26 @@ class FineGrainedRetriever(nn.Module):
         h_id_tensor, t_id_tensor = batch.edge_index
         # h_id_tensor, t_id_tensor = edge_index
         # add reverse for performance gain
-        edge_index_reverse = edge_index.flip(0)
-        edge_index = torch.cat([edge_index, edge_index_reverse], dim=1)
+        edge_index_reverse = batch.edge_index.flip(0)
+        edge_index_ = torch.cat([batch.edge_index, edge_index_reverse], dim=1)
 
-        edge_attr_reverse = self.proj_reverse(edge_attr)
-        h_r = torch.cat([edge_attr, edge_attr_reverse], dim=0)
+        edge_attr_reverse = self.proj_reverse(batch.edge_attr)
+        edge_attr_ = torch.cat([batch.edge_attr, edge_attr_reverse], dim=0)
 
         h_e_list = self.backbone(
-            edge_index,
+            edge_index_,
             # topic_entity_one_hot,
-            entity_embd,
-            h_r,
+            batch.x,
+            edge_attr_,
         )
         h_e = torch.cat(h_e_list, dim=1)  # updated node embd
 
         # triplet embedding. Note that relation embeddings not updated.
+
         h_triple = torch.cat([
-            q_embd.expand(len(edge_attr), -1),
+            batch_q_embds,
             h_e[h_id_tensor],
-            edge_attr,
+            batch.edge_attr,
             h_e[t_id_tensor]
         ], dim=1)
         # attention logits for each triplet.
