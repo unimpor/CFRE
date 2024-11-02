@@ -31,7 +31,7 @@ def main():
     # train_set = RetrievalDataset(config=config["dataset"], split='train', )
     val_set = RetrievalDataset(config=config["dataset"], split='val', )
     # test_set = RetrievalDataset(config=config["dataset"], split='test', )
-    print(len(val_set))
+    # print(len(val_set), val_set[0])
 
     # if config['dataset']['random_split']:
     #     train_set, val_set, test_set = random_split(
@@ -94,27 +94,27 @@ def main():
               f"Supervisory Loss: {pred_loss / len(train_loader)}")
         # wandb.log({'Train Loss (Epoch Mean)': epoch_loss / len(train_loader)})
 
-        # val_loss, best_epoch = 0., 0
-        # cfre.eval()
-        # with torch.no_grad():
-        #     for step, batch in enumerate(val_loader):
-        #         loss = cfre(batch)
-        #         val_loss += loss.item()
-        #     val_loss = val_loss / len(val_loader)
-        #     print(f"Epoch: {epoch}|{args.num_epochs}: Val Loss: {val_loss}")
-        #     wandb.log({'Val Loss': val_loss})
+        val_loss, best_epoch = 0., 0
+        cfre.eval()
+        with torch.no_grad():
+            for step, batch in enumerate(val_loader):
+                loss = cfre(batch)
+                val_loss += loss.item()
+            val_loss = val_loss / len(val_loader)
+            print(f"Epoch: {epoch}|{args.num_epochs}: Val Loss: {val_loss}")
+            wandb.log({'Val Loss': val_loss})
 
-        # if val_loss < best_val_loss:
-        #     best_val_loss = val_loss
-        #     # save fg retriever
-        #     save_checkpoint(cfre.ibtn, optimizer, epoch, args, is_best=True)
-        #     best_epoch = epoch
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            # save fg retriever
+            save_checkpoint(cfre.ibtn, optimizer, epoch, args, is_best=True)
+            best_epoch = epoch
 
-        # print(f'Epoch {epoch} Val Loss {val_loss} Best Val Loss {best_val_loss} Best Epoch {best_epoch}')
+        print(f'Epoch {epoch} Val Loss {val_loss} Best Val Loss {best_val_loss} Best Epoch {best_epoch}')
 
-        # if epoch - best_epoch >= args.patience:
-        #     print(f'Early stop at epoch {epoch}')
-        #     break
+        if epoch - best_epoch >= args.patience:
+            print(f'Early stop at epoch {epoch}')
+            break
     # Evaluation: 1) retriever performance 2) overall performance
 
 

@@ -37,9 +37,11 @@ class CFRE(nn.Module):
 
     def forward_pass(self, batch, epoch):
         # 2. generate mask for the coarsely retrieved samples.
-        edge_index, entity_embd, answer, edge_attr, triplets, relevant_idx, question, q_embd = batch
-        edge_index, entity_embd, edge_attr, q_embd = edge_index.to(self.device), entity_embd.to(self.device), edge_attr.to(self.device), q_embd.to(self.device)
-        attn_logtis, attns = self.ibtn(entity_embd, edge_index, edge_attr, q_embd)
+        graph, answer, triplets, relevant_idx, question, q_embd = batch["graph"], batch["y"], \
+                                            batch["triplets"], batch["relevant_idx"], batch["q"], batch["q_embd"]
+        graph = graph.to(self.device)
+
+        attn_logtis, attns = self.ibtn(graph, q_embd)
         attn_loss, loss_dict = self.__loss__(attn_logtis, relevant_idx,)  # calculate attn-related loss
         # 3. generate filtered retrieval results
         assert len(triplets) == len(attns)

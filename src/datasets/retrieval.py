@@ -3,6 +3,7 @@ from os.path import join as opj
 import pickle
 import torch.nn.functional as F
 import torch
+from torch_geometric.data.data import Data
 
 
 class RetrievalDataset:

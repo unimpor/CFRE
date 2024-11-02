@@ -33,7 +33,7 @@ class FineGrainedRetriever(nn.Module):
                 config['num_layers'],
                 config['aggr']
             )
-        if model_type == "PNA":
+        elif model_type == "PNA":
             pass
         else:
             raise NotImplementedError(f'GNN type {model_type} not implemented.')
@@ -51,7 +51,7 @@ class FineGrainedRetriever(nn.Module):
             nn.Linear(emb_size, emb_size)
         )
 
-    def forward(self, entity_embd, edge_index, edge_attr, q_embd):
+    def forward(self, batch, q_embd):
         # TODO: Currently deprecate two Functions, `non_text_entity_embd` and `topic_entity_onehot`
         # if self.non_text_entity_emb is None:
         #     h_e = torch.cat([
@@ -64,8 +64,8 @@ class FineGrainedRetriever(nn.Module):
         #         self.non_text_entity_emb(torch.LongTensor([0]).to(device)).expand(
         #             num_non_text_entities, -1)
         #     ], dim=0)
-
-        h_id_tensor, t_id_tensor = edge_index
+        h_id_tensor, t_id_tensor = batch.edge_index
+        # h_id_tensor, t_id_tensor = edge_index
         # add reverse for performance gain
         edge_index_reverse = edge_index.flip(0)
         edge_index = torch.cat([edge_index, edge_index_reverse], dim=1)

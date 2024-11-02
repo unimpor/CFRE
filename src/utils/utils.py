@@ -3,6 +3,7 @@ import random
 import numpy as np
 import networkx as nx
 import math
+from torch_geometric.data import Batch
 
 
 def set_seed(seed):
@@ -47,8 +48,16 @@ def adjust_learning_rate(param_group, LR, epoch, args):
 #            sample['a_entity_id_list']
 
 
-def collate_fn(data):
-    sample = data[0]
-    return sample['edge_index'], sample['entity_embd'], sample["y"], sample['edge_attr'], \
-        sample['triplets'], sample['relevant_idx'], \
-        sample['q'], sample['q_embd']
+# def collate_fn(data):
+#     sample = data[0]
+#     return sample['edge_index'], sample['entity_embd'], sample["y"], sample['edge_attr'], \
+#         sample['triplets'], sample['relevant_idx'], \
+#         sample['q'], sample['q_embd']
+
+def collate_fn(batch_org):
+    batch = {}
+    for k in batch_org[0].keys():
+        batch[k] = [d[k] for d in batch_org]
+    if 'graph' in batch:
+        batch['graph'] = Batch.from_data_list(batch['graph'])
+    return batch
