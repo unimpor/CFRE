@@ -8,11 +8,11 @@ dataset:
 
 env:
   seed: 42
-  device: &device 'cuda:0'
+  device: &device 'cuda:1'
 
 llms:
   device: *device
-  llm_frozen: True
+  llm_frozen: False
   llm_model_path: meta-llama/Llama-3.2-1B-Instruct
   llm_model_name: Llama-3.2-1B-Instruct
 
@@ -23,8 +23,8 @@ train:
   patience: 2
   batch_size: 1
   grad_steps: 2
-  num_epochs: 10
-  warmup_epochs: 2
+  num_epochs: 100
+  
 
 log:
   root: <TODO>
@@ -45,6 +45,8 @@ algorithm:
   filtering_num_or_ratio: 50 # int or float
   triplet2text: drop # "drop" or "mask"
   grad_normalize: True
+  warmup: True
+  warmup_epochs: 5
 
 #    # Inference
 #    parser.add_argument("--eval_batch_size", type=int, default=16)

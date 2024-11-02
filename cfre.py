@@ -11,6 +11,8 @@ class CFRE(nn.Module):
         self.llms = llm_model
         self.strategy = config['triplet2text']
         self.grad_normalize = config['grad_normalize']
+        self.warmup = config['warmup']
+        self.warmup_epochs = config['warmup_epochs']
 
     @property
     def device(self):
@@ -33,7 +35,7 @@ class CFRE(nn.Module):
 
         return dir_loss, {"dir": dir_loss.item()}
 
-    def forward_pass(self, batch):
+    def forward_pass(self, batch, epoch):
         # 2. generate mask for the coarsely retrieved samples.
         edge_index, entity_embd, answer, edge_attr, triplets, relevant_idx, question, q_embd = batch
         edge_index, entity_embd, edge_attr, q_embd = edge_index.to(self.device), entity_embd.to(self.device), edge_attr.to(self.device), q_embd.to(self.device)
@@ -41,13 +43,15 @@ class CFRE(nn.Module):
         attn_loss, loss_dict = self.__loss__(attn_logtis, relevant_idx,)  # calculate attn-related loss
         # 3. generate filtered retrieval results
         assert len(triplets) == len(attns)
-        # batch_masked_triple_token_ids = self.mask_triplet(triplets, attns)
-        attns, triplets_token_ids = self.mask_triplet(triplets, attns)
-        # 4. LLM supervisions
-        # outputs = self.llms.forward_pass(batch_masked_triple_token_ids, question, answer)
-        outputs = self.llms.forward_pass(attns, triplets_token_ids, question, answer)
-        loss = attn_loss + outputs.loss
-        loss_dict["predict"] = outputs.loss.item()
+        loss, loss_dict["predict"] = attn_loss, 0.
+        if not self.warmup or epoch >= self.warmup_epochs:
+            # batch_masked_triple_token_ids = self.mask_triplet(triplets, attns)
+            attns, triplets_token_ids = self.mask_triplet(triplets, attns)
+            # 4. LLM supervisions
+            # outputs = self.llms.forward_pass(batch_masked_triple_token_ids, question, answer)
+            pred_loss = self.llms.forward_pass(attns, triplets_token_ids, question, answer)
+            loss += pred_loss
+            loss_dict["predict"] = pred_loss.item()
         return loss, loss_dict
 
     def mask_triplet(self, triplets, attns, ):
@@ -70,7 +74,7 @@ class CFRE(nn.Module):
 
             def custom_backward_hook(grad):
                 lengths = torch.ones_like(grad, dtype=torch.float32)
-                lengths[indices] = torch.tensor(length, dtype=torch.float32)
+                lengths[indices] = torch.tensor(length, dtype=torch.float32).to(self.device)
                 normalized_grad = grad / lengths  # Normalize by expansion lengths
                 return normalized_grad
 

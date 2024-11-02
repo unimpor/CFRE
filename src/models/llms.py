@@ -37,15 +37,16 @@ class LLMs(nn.Module):
 
         if config['llm_frozen'] is True:
             print("Freezing LLAMA!")
-            for name, param in model.named_parameters():
+            for _, param in model.named_parameters():
                 param.requires_grad = False
 
         self.model = model
         self.word_embedding = self.model.model.get_input_embeddings()
 
-    def forward_pass(self, attns, bm_triplet_ids, question, label):
+    def forward_pass(self, attns, bm_triplet_ids, question, label, training=True):
         """
         Calculate prediction loss given post-processed retrival contents.
+        Used in the training and eval process, not in inference.
         """
 
         # TODO: batch-wise prompt. Now this is sample-wise
@@ -68,7 +69,10 @@ class LLMs(nn.Module):
             # input_ids = former_pmt_ids["input_ids"] + bm_triplet_ids.tolist() + latter_pmt_ids["input_ids"] + label_ids
             # inputs_embeds = self.word_embedding(torch.tensor(input_ids).to(self.model.device))
             former_pmt_embeds = self.word_embedding(torch.tensor(former_pmt_ids).to(self.model.device))
-            bm_triplet_embeds = attns * self.word_embedding(bm_triplet_ids.to(self.model.device))
+
+            bm_triplet_embeds = attns * self.word_embedding(bm_triplet_ids.to(self.model.device)) if training else \
+                                self.word_embedding(bm_triplet_ids.to(self.model.device))
+
             latter_pmt_embeds = self.word_embedding(torch.tensor(latter_pmt_ids + label_pmt_ids).to(self.model.device))
             # TODO: combine with attns
             inputs_embeds = torch.concat([former_pmt_embeds, 
@@ -102,7 +106,8 @@ class LLMs(nn.Module):
         return outputs.loss
 
     def inference(self, samples):
-        pass
+        # For inference of the project, follow SubgraphRAG first.
+        raise NotImplementedError
 
     def __loss__(self):
         pass

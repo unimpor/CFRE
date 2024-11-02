@@ -17,10 +17,12 @@ def main():
     parser.add_argument('--device', type=int, default=0, help='cuda device id, -1 for cpu')
     parser.add_argument('--config_path', type=str, default="./config/config.yaml", help='path of config file')
     args = parser.parse_args()
-    device = torch.device(config['env']['device'])
+    
     config = yaml.safe_load(open(args.config_path, 'r'))
     train_config = config['train']
     algo_config = config['algorithm']
+    device = torch.device(config['env']['device'])
+    train_config['lr'] = float(train_config['lr'])
     # wandb.init(project=f"",
     #            name=f"",
     #            config=config)
@@ -64,11 +66,11 @@ def main():
     for epoch in tqdm(range(train_config['num_epochs'])):
 
         cfre.train()
-        epoch_loss, accum_loss = 0., 0.
+        epoch_loss, accum_loss, pred_loss = 0., 0., 0.
 
         for step, batch in enumerate(train_loader):
             optimizer.zero_grad()
-            loss, loss_dict = cfre.forward_pass(batch)
+            loss, loss_dict = cfre.forward_pass(batch, epoch)
             loss.backward()
 
             # gradient and learning rate adjustment
@@ -79,7 +81,7 @@ def main():
             #     adjust_learning_rate(optimizer.param_groups[0], args.lr, step / len(train_loader) + epoch, args)
 
             optimizer.step()
-            epoch_loss, accum_loss = epoch_loss + loss.item(), accum_loss + loss.item()
+            epoch_loss, accum_loss, pred_loss = epoch_loss + loss.item(), accum_loss + loss.item(), pred_loss + loss_dict['predict']
 
             # if (step + 1) % args.grad_steps == 0:
             #     lr = optimizer.param_groups[0]["lr"]
@@ -88,32 +90,31 @@ def main():
             #     accum_loss = 0.
 
         # Average Loss per epoch
-        print(f"Epoch: {epoch}|{args.num_epochs}: "
-              f"Train Loss: {epoch_loss / len(train_loader)}"
-              f"Supervisory Loss: ")
-        wandb.log({'Train Loss (Epoch Mean)': epoch_loss / len(train_loader)})
+        print(f"Epoch: {epoch}|{train_config['num_epochs']}: "
+              f"Supervisory Loss: {pred_loss / len(train_loader)}")
+        # wandb.log({'Train Loss (Epoch Mean)': epoch_loss / len(train_loader)})
 
-        val_loss, best_epoch = 0., 0
-        cfre.eval()
-        with torch.no_grad():
-            for step, batch in enumerate(val_loader):
-                loss = cfre(batch)
-                val_loss += loss.item()
-            val_loss = val_loss / len(val_loader)
-            print(f"Epoch: {epoch}|{args.num_epochs}: Val Loss: {val_loss}")
-            wandb.log({'Val Loss': val_loss})
+        # val_loss, best_epoch = 0., 0
+        # cfre.eval()
+        # with torch.no_grad():
+        #     for step, batch in enumerate(val_loader):
+        #         loss = cfre(batch)
+        #         val_loss += loss.item()
+        #     val_loss = val_loss / len(val_loader)
+        #     print(f"Epoch: {epoch}|{args.num_epochs}: Val Loss: {val_loss}")
+        #     wandb.log({'Val Loss': val_loss})
 
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            # save fg retriever
-            save_checkpoint(cfre.ibtn, optimizer, epoch, args, is_best=True)
-            best_epoch = epoch
+        # if val_loss < best_val_loss:
+        #     best_val_loss = val_loss
+        #     # save fg retriever
+        #     save_checkpoint(cfre.ibtn, optimizer, epoch, args, is_best=True)
+        #     best_epoch = epoch
 
-        print(f'Epoch {epoch} Val Loss {val_loss} Best Val Loss {best_val_loss} Best Epoch {best_epoch}')
+        # print(f'Epoch {epoch} Val Loss {val_loss} Best Val Loss {best_val_loss} Best Epoch {best_epoch}')
 
-        if epoch - best_epoch >= args.patience:
-            print(f'Early stop at epoch {epoch}')
-            break
+        # if epoch - best_epoch >= args.patience:
+        #     print(f'Early stop at epoch {epoch}')
+        #     break
     # Evaluation: 1) retriever performance 2) overall performance
 
 
