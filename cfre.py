@@ -49,8 +49,8 @@ class CFRE(nn.Module):
         loss, loss_dict["predict"] = attn_loss, 0.
         if not self.warmup or epoch >= self.warmup_epochs:
             # batch_masked_triple_token_ids = self.mask_triplet(triplets, attns)
-            if batch_size > 1:
-                attns = [attns[triplet_batch_idx==i] for i in range(batch_size)] 
+
+            attns = [attns[triplet_batch_idx==i] for i in range(batch_size)] 
             masked_triplets_batch, masked_attns_batch = self.mask_triplet(triplet_batch, attns)
             # 4. LLM supervisions
             # outputs = self.llms.forward_pass(batch_masked_triple_token_ids, question, answer)

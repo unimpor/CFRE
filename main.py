@@ -28,16 +28,15 @@ def main():
     #            config=config)
 
     set_seed(config['env']['seed'])
-    # train_set = RetrievalDataset(config=config["dataset"], split='train', )
+    train_set = RetrievalDataset(config=config["dataset"], split='train', )
     val_set = RetrievalDataset(config=config["dataset"], split='val', )
     # test_set = RetrievalDataset(config=config["dataset"], split='test', )
-    # print(len(val_set), val_set[0])
-
+    print(len(train_set), train_config['batch_size'])
     # if config['dataset']['random_split']:
     #     train_set, val_set, test_set = random_split(
     #         train_set, val_set, test_set, config['env']['seed'])
 
-    # train_loader = DataLoader(train_set, batch_size=train_config['batch_size'], shuffle=True, collate_fn=collate_fn)
+    # train_loader = DataLoader(train_set, batch_size=train_config['batch_size'], shuffle=True, collate_fn=collate_fn, drop_last=True)
     train_loader = DataLoader(val_set, batch_size=train_config['batch_size'], collate_fn=collate_fn)
     # test_loader = DataLoader(test_set, batch_size=train_config['batch_size'], collate_fn=collate_fn)
     # Build Model. Load ibtn, llms, cfre.
@@ -50,7 +49,6 @@ def main():
     trainable_params, all_param = cfre.trainable_params
     print(
         f"trainable params: {trainable_params} || all params: {all_param} || trainable%: {100 * trainable_params / all_param}")
-
 
     # Set up Optimizer.
     params = [p for _, p in cfre.named_parameters() if p.requires_grad]
@@ -66,7 +64,7 @@ def main():
     for epoch in tqdm(range(train_config['num_epochs'])):
 
         cfre.train()
-        epoch_loss, accum_loss, pred_loss = 0., 0., 0.
+        epoch_loss, accum_loss, pred_loss, dir_loss = 0., 0., 0., 0.
 
         for step, batch in enumerate(train_loader):
             optimizer.zero_grad()
@@ -81,7 +79,7 @@ def main():
             #     adjust_learning_rate(optimizer.param_groups[0], args.lr, step / len(train_loader) + epoch, args)
 
             optimizer.step()
-            epoch_loss, accum_loss, pred_loss = epoch_loss + loss.item(), accum_loss + loss.item(), pred_loss + loss_dict['predict']
+            epoch_loss, accum_loss, pred_loss, dir_loss = epoch_loss + loss.item(), accum_loss + loss.item(), pred_loss + loss_dict['predict'], dir_loss + loss_dict['dir']
 
             # if (step + 1) % args.grad_steps == 0:
             #     lr = optimizer.param_groups[0]["lr"]
@@ -91,6 +89,7 @@ def main():
 
         # Average Loss per epoch
         print(f"Epoch: {epoch}|{train_config['num_epochs']}: "
+              f"Dir Loss: {dir_loss / len(train_loader)}"
               f"Supervisory Loss: {pred_loss / len(train_loader)}")
         # wandb.log({'Train Loss (Epoch Mean)': epoch_loss / len(train_loader)})
 

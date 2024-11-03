@@ -8,7 +8,7 @@ dataset:
 
 env:
   seed: 42
-  device: &device 'cuda:1'
+  device: &device 'cuda:0'
 
 llms:
   device: *device
@@ -21,7 +21,7 @@ train:
   lr: 1e-5
   wd: 0.05
   patience: 2
-  batch_size: 4
+  batch_size: 2
   grad_steps: 2
   num_epochs: 100
   
@@ -45,7 +45,7 @@ algorithm:
   filtering_num_or_ratio: 50 # int or float
   triplet2text: drop # "drop" or "mask"
   grad_normalize: True
-  warmup: False
+  warmup: True
   warmup_epochs: 5
 
 #    # Inference

@@ -73,7 +73,6 @@ def collate_fn(batch_org):
         all_rel_idx.append(torch.tensor(rel_idx) + current_node_count)
         current_node_count += num_tr
     batch['relevant_idx'] = torch.cat(all_rel_idx)
-    
     # combined_list = sum(batch['triplets'], [])
     # a = [combined_list[idx.item()] for idx in batch['relevant_idx']]
     # b = sum([[d['triplets'][idx] for idx in d['relevant_idx']] for d in batch_org], [])
