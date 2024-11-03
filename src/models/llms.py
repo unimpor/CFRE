@@ -43,18 +43,18 @@ class LLMs(nn.Module):
         self.model = model
         self.word_embedding = self.model.model.get_input_embeddings()
 
-    def forward_pass(self, attns, bm_triplet_ids, question, label, training=True):
+    def forward_pass(self, attns, bm_triplet_ids, question_batch, label_batch, training=True):
         """
         Calculate prediction loss given post-processed retrival contents.
         Used in the training and eval process, not in inference.
         """
 
         # TODO: batch-wise prompt. Now this is sample-wise
-        label = "[" + ", ".join(label) + "]"
-        batch_size = 1
+        label_batch = ["[" + ", ".join(label) + "]" for label in label_batch]
+        batch_size = len(bm_triplet_ids)
         former_pmt = FORMER
-        latter_pmt = LATTER.format(question=question)
-        label_pmt = LABEL.format(label=label)
+        latter_pmt = [LATTER.format(question=question) for question in question_batch]
+        label_pmt = [LABEL.format(label=label) for label in label_batch]
 
         former_pmt_ids = self.tokenizer(former_pmt, add_special_tokens=False)["input_ids"]
         latter_pmt_ids = self.tokenizer(latter_pmt, add_special_tokens=False)["input_ids"]
@@ -70,28 +70,27 @@ class LLMs(nn.Module):
             # inputs_embeds = self.word_embedding(torch.tensor(input_ids).to(self.model.device))
             former_pmt_embeds = self.word_embedding(torch.tensor(former_pmt_ids).to(self.model.device))
 
-            bm_triplet_embeds = attns * self.word_embedding(bm_triplet_ids.to(self.model.device)) if training else \
-                                self.word_embedding(bm_triplet_ids.to(self.model.device))
+            bm_triplet_embeds = attns[i] * self.word_embedding(bm_triplet_ids[i].to(self.model.device)) if training else \
+                                self.word_embedding(bm_triplet_ids[i].to(self.model.device))
 
-            latter_pmt_embeds = self.word_embedding(torch.tensor(latter_pmt_ids + label_pmt_ids).to(self.model.device))
+            latter_pmt_embeds = self.word_embedding(torch.tensor(latter_pmt_ids[i] + label_pmt_ids[i]).to(self.model.device))
             # TODO: combine with attns
             inputs_embeds = torch.concat([former_pmt_embeds, 
                                           bm_triplet_embeds, 
                                           latter_pmt_embeds], dim=0)
             batch_inputs_embeds.append(inputs_embeds)
             batch_attention_mask.append([1] * inputs_embeds.shape[0])
-            label_input_ids = [self.ignore_idx] * (inputs_embeds.shape[0] - len(label_pmt_ids)) + label_pmt_ids
+            label_input_ids = [self.ignore_idx] * (inputs_embeds.shape[0] - len(label_pmt_ids[i])) + label_pmt_ids[i]
             batch_label_input_ids.append(label_input_ids)
-            
-        # TODO: deprecated feature when batch size = 1.
-        # max_length = max([x.shape[0] for x in batch_inputs_embeds])
-        # pad_embeds = self.word_embedding(torch.tensor(self.tokenizer.pad_token_id)).unsqueeze(0)
+   
+        max_length = max([x.shape[0] for x in batch_inputs_embeds])
+        pad_embeds = self.word_embedding(torch.tensor(self.tokenizer.pad_token_id).to(self.model.device)).unsqueeze(0)
 
-        # for i in range(batch_size):
-        #     pad_length = max_length - batch_inputs_embeds[i].shape[0]
-        #     batch_inputs_embeds[i] = torch.cat([pad_embeds.repeat(pad_length, 1), batch_inputs_embeds[i]])
-        #     batch_attention_mask[i] = [0] * pad_length + batch_attention_mask[i]
-        #     batch_label_input_ids[i] = [self.ignore_idx] * pad_length + batch_label_input_ids[i]
+        for i in range(batch_size):
+            pad_length = max_length - batch_inputs_embeds[i].shape[0]
+            batch_inputs_embeds[i] = torch.cat([pad_embeds.repeat(pad_length, 1), batch_inputs_embeds[i]])
+            batch_attention_mask[i] = [0] * pad_length + batch_attention_mask[i]
+            batch_label_input_ids[i] = [self.ignore_idx] * pad_length + batch_label_input_ids[i]
 
         inputs_embeds = torch.stack(batch_inputs_embeds, dim=0).to(self.model.device)
         attention_mask = torch.tensor(batch_attention_mask).to(self.model.device)
@@ -105,7 +104,7 @@ class LLMs(nn.Module):
         )
         return outputs.loss
 
-    def inference(self, samples):
+    def inference(self, ):
         # For inference of the project, follow SubgraphRAG first.
         raise NotImplementedError
 

@@ -37,31 +37,29 @@ class CFRE(nn.Module):
 
     def forward_pass(self, batch, epoch):
         # 2. generate mask for the coarsely retrieved samples.
-        graph, answer, triplets, relevant_idx, question, q_embd = batch["graph"], batch["y"], \
-                                            batch["triplets"], batch["relevant_idx"], batch["q"], batch["q_embd"]
-        graph = graph.to(self.device)
-        
-        edges_per_graph = [len(triplets[i]) for i in range(graph.num_graphs)]
-        batch_q_embd = torch.cat([q_embd[i].to(self.device).expand(edges_per_graph[i], -1) for i in range(graph.num_graphs)])
-        
-        batch_idx = graph.batch
-        attn_logtis, attns = self.ibtn(graph, batch_q_embd)
-        input("success!")
-        attn_loss, loss_dict = self.__loss__(attn_logtis, relevant_idx,)  # calculate attn-related loss
+        graph_batch, answer_batch, triplet_batch, triplet_batch_idx, relevant_idx_batch, question_batch, q_embd_batch = \
+            batch["graph"], batch["y"], batch["triplets"], batch['triplet_batch_idx'], batch["relevant_idx"], batch["q"], batch["q_embd"]
+        batch_size = graph_batch.num_graphs
+        graph_batch, q_embd_batch, relevant_idx_batch = \
+            graph_batch.to(self.device), q_embd_batch.to(self.device), relevant_idx_batch.to(self.device)
+
+        attn_logtis, attns = self.ibtn(graph_batch, triplet_batch_idx, q_embd_batch)
+        attn_loss, loss_dict = self.__loss__(attn_logtis, relevant_idx_batch,)  # calculate attn-related loss
         # 3. generate filtered retrieval results
-        assert len(triplets) == len(attns)
         loss, loss_dict["predict"] = attn_loss, 0.
         if not self.warmup or epoch >= self.warmup_epochs:
             # batch_masked_triple_token_ids = self.mask_triplet(triplets, attns)
-            attns, triplets_token_ids = self.mask_triplet(triplets, attns)
+            if batch_size > 1:
+                attns = [attns[triplet_batch_idx==i] for i in range(batch_size)] 
+            masked_triplets_batch, masked_attns_batch = self.mask_triplet(triplet_batch, attns)
             # 4. LLM supervisions
             # outputs = self.llms.forward_pass(batch_masked_triple_token_ids, question, answer)
-            pred_loss = self.llms.forward_pass(attns, triplets_token_ids, question, answer)
+            pred_loss = self.llms.forward_pass(masked_attns_batch, masked_triplets_batch, question_batch, answer_batch)
             loss += pred_loss
             loss_dict["predict"] = pred_loss.item()
         return loss, loss_dict
 
-    def mask_triplet(self, triplets, attns, ):
+    def mask_triplet(self, triplets_batch, attns_batch, ):
         """
         `strategy` can be set as "drop" or "mask", "drop" as default.
         Mask tokenized triplets using attn
@@ -71,7 +69,7 @@ class CFRE(nn.Module):
         # Example: triplets converted into strings
 
         # Load the tokenizer
-        assert len(triplets) == attns.shape[0]
+        
 
         def triplet_to_str(triplet):
             return f"({triplet[0]},{triplet[1]},{triplet[2]})"
@@ -88,45 +86,51 @@ class CFRE(nn.Module):
             return custom_backward_hook
 
         if self.strategy == "drop":
+            masked_attns_batch, masked_triplets_batch = [], []
+            for triplets, attns in zip(triplets_batch, attns_batch):
             # In this strategy, just drop the unselected triplets.
-            keep_idx = [idx for idx, score in enumerate(attns) if score.item() == 1]
-            
-            tokenized_triplets = [self.llms.tokenizer(triplet_to_str(triplets[idx]), return_tensors="pt")
-                                  for idx in keep_idx]
-            triplets_token_ids = torch.cat(
-                [tokenized_triplet["input_ids"].squeeze() for tokenized_triplet in tokenized_triplets]).to(self.device)
+                assert len(triplets) == attns.shape[0]
+                keep_idx = [idx for idx, score in enumerate(attns) if score.item() == 1]
+                
+                tokenized_triplets = [self.llms.tokenizer(triplet_to_str(triplets[idx]), return_tensors="pt")
+                                    for idx in keep_idx]
+                triplets_token_ids = torch.cat(
+                    [tokenized_triplet["input_ids"].squeeze() for tokenized_triplet in tokenized_triplets]).to(self.device)
 
-            triplet_lengths = [len(tokenized_triplet["input_ids"].squeeze()) for tokenized_triplet in
-                               tokenized_triplets]
-            # TODO: we may consider batch size > 1
-            if self.grad_normalize:
-                attns.register_hook(create_hook(length=triplet_lengths, indices=keep_idx))
+                triplet_lengths = [len(tokenized_triplet["input_ids"].squeeze()) for tokenized_triplet in
+                                tokenized_triplets]
+                # TODO: we may consider batch size > 1
+                if self.grad_normalize:
+                    attns.register_hook(create_hook(length=triplet_lengths, indices=keep_idx))
 
-            attns = torch.cat([
-                attns[idx].expand(length) for idx, length in zip(keep_idx, triplet_lengths)
-            ]).unsqueeze(1)  # expand and cut.
-            # assert attns.shape == triplets_token_ids.shape
-            masked_token_ids = attns * triplets_token_ids
+                attns = torch.cat([
+                    attns[idx].expand(length) for idx, length in zip(keep_idx, triplet_lengths)
+                ]).unsqueeze(1)  # expand and cut.
+                
+                masked_attns_batch.append(attns)
+                masked_triplets_batch.append(triplets_token_ids)
+                # assert attns.shape == triplets_token_ids.shape
+                # masked_token_ids = attns * triplets_token_ids
 
-        elif self.strategy == "mask":
-            tokenized_triplets = [self.llms.tokenizer(triplet_to_str(triplet), return_tensors="pt")
-                                  for (triplet, score) in zip(triplets, attns)]
-            triplets_token_ids = torch.cat(
-                [tokenized_triplet["input_ids"].squeeze() for tokenized_triplet in tokenized_triplets])
+        # elif self.strategy == "mask":
+        #     tokenized_triplets = [self.llms.tokenizer(triplet_to_str(triplet), return_tensors="pt")
+        #                           for (triplet, score) in zip(triplets, attns)]
+        #     triplets_token_ids = torch.cat(
+        #         [tokenized_triplet["input_ids"].squeeze() for tokenized_triplet in tokenized_triplets])
 
-            # Get the lengths of the tokenized triplets (number of tokens in each triplet)
-            triplet_lengths = [len(tokenized_triplet["input_ids"].squeeze()) for tokenized_triplet in tokenized_triplets]
-            masks = torch.cat([attns[i].expand(triplet_lengths[i]) for i in range(len(attns))])
+        #     # Get the lengths of the tokenized triplets (number of tokens in each triplet)
+        #     triplet_lengths = [len(tokenized_triplet["input_ids"].squeeze()) for tokenized_triplet in tokenized_triplets]
+        #     masks = torch.cat([attns[i].expand(triplet_lengths[i]) for i in range(len(attns))])
 
-            mu = self.llms.tokenizer.encode(PLACEHOLDER, add_special_tokens=False)[0]  # Using the [MASK] token's ID
-            # Create a placeholder tensor with the same length as concatenated token IDs
-            placeholders = torch.full_like(triplets_token_ids, mu)
+        #     mu = self.llms.tokenizer.encode(PLACEHOLDER, add_special_tokens=False)[0]  # Using the [MASK] token's ID
+        #     # Create a placeholder tensor with the same length as concatenated token IDs
+        #     placeholders = torch.full_like(triplets_token_ids, mu)
             # Apply the mask (element-wise multiplication)
-            masked_token_ids = masks * triplets_token_ids + (1 - masks) * placeholders
+            # masked_token_ids = masks * triplets_token_ids + (1 - masks) * placeholders
 
         else:
             raise NotImplementedError
-        return attns, triplets_token_ids
+        return masked_triplets_batch, masked_attns_batch
         # return masked_token_ids
 
     @property

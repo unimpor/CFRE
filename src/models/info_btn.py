@@ -55,7 +55,7 @@ class FineGrainedRetriever(nn.Module):
     def device(self):
         return list(self.parameters())[0].device
     
-    def forward(self, batch, batch_q_embds):
+    def forward(self, batch, triplet_batch_idx, batch_q_embds):
         # TODO: Currently deprecate two Functions, `non_text_entity_embd` and `topic_entity_onehot`
         # if self.non_text_entity_emb is None:
         #     h_e = torch.cat([
@@ -95,7 +95,19 @@ class FineGrainedRetriever(nn.Module):
         ], dim=1)
         # attention logits for each triplet.
         attn_logtis = self.pred(h_triple).squeeze()
-        return attn_logtis, self.sampling(attn_logtis)
+        # 0/1 attention for each triplet. Note that topk strategy should be done per sample, rather than batch.
+        if self.strategy == "idp-bern":
+            attns = self.sampling(attn_logtis)
+        elif self.strategy == "topk":
+            attns = []
+            for idx in range(batch.num_graphs):
+                attn_logit = attn_logtis[triplet_batch_idx == idx]
+                attn = self.sampling(attn_logit)
+                attns.append(attn)
+            attns = torch.concat(attns)
+        else:
+            raise NotImplementedError
+        return attn_logtis, attns
 
     def sampling(self, att_log_logit, temp=1, training=True):
         """
