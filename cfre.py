@@ -29,9 +29,11 @@ class CFRE(nn.Module):
 
         # con_loss = None
         #
-        attn_target = attn_logtis[relevant_idx]
-        target = torch.ones_like(attn_target)
-        dir_loss = F.mse_loss(attn_target, target, reduction="mean")
+        # TODO: only make it as warmup, change it to bi-clfs problem.
+        # attn_target = attn_logtis[relevant_idx]
+        target = torch.zeros_like(attn_logtis)
+        target[relevant_idx] = 1.
+        dir_loss = F.mse_loss(attn_logtis, target, reduction="mean")
 
         return dir_loss, {"dir": dir_loss.item()}
 
