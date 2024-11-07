@@ -1,9 +1,10 @@
 """
 This file is temporarily not useful.
 """
+import math
 import torch
 import torch.nn as nn
-from src.models.gnn import SAGE
+from src.models.gnn import SAGE, PNA
 from src.utils import gumbel_topk
 
 
@@ -12,12 +13,14 @@ class FineGrainedRetriever(nn.Module):
                  config,
                  filtering_strategy,
                  filtering_num_or_ratio,
+                 add_gumbel=True,
                  **kwargs):
         super().__init__()
 
         self.strategy = filtering_strategy  # strategy of filtering irrelevant info
         self.filter_num_or_ratio = filtering_num_or_ratio
-
+        self.training = True
+        self.add_gumbel = add_gumbel
         emb_size = config['hidden_size']
         model_type = config['model_type']
 
@@ -29,12 +32,14 @@ class FineGrainedRetriever(nn.Module):
         if model_type == 'graphsage':
             self.backbone = SAGE(
                 emb_size,
-                config['topic_pe'],
                 config['num_layers'],
                 config['aggr']
             )
         elif model_type == "PNA":
-            pass
+            self.backbone = PNA(
+                emb_size,
+                config['num_layers'],
+            )
         else:
             raise NotImplementedError(f'GNN type {model_type} not implemented.')
 
@@ -54,6 +59,12 @@ class FineGrainedRetriever(nn.Module):
     @property
     def device(self):
         return list(self.parameters())[0].device
+    
+    def set_eval(self):
+        self.training = False
+    
+    def set_train(self):
+        self.training = True
     
     def forward(self, batch, triplet_batch_idx, batch_q_embds):
         # TODO: Currently deprecate two Functions, `non_text_entity_embd` and `topic_entity_onehot`
@@ -109,7 +120,7 @@ class FineGrainedRetriever(nn.Module):
             raise NotImplementedError
         return attn_logtis, attns
 
-    def sampling(self, att_log_logit, temp=1, training=True):
+    def sampling(self, att_log_logit, temp=1):
         """
         strategy = "idp-bern" or "topk"
         K only applies when `strategy` set to "topk"
@@ -119,16 +130,18 @@ class FineGrainedRetriever(nn.Module):
         # training -- introduce stochastic
         if self.strategy == "idp-bern":
             # TODO: add straight-through gumbel.
-            if not training:
+            if not self.training:
                 return att_log_logit.sigmoid()
             random_noise = torch.empty_like(att_log_logit).uniform_(1e-10, 1 - 1e-10)
             random_noise = torch.log(random_noise) - torch.log(1.0 - random_noise)
             return ((att_log_logit + random_noise) / temp).sigmoid()
         elif self.strategy == "topk":
-            if not training:
-                _, topk_indices = att_log_logit.topk(self.filter_num_or_ratio, dim=0, largest=True, sorted=False)
+            K = self.filter_num_or_ratio if type(self.filter_num_or_ratio) is int \
+                else math.ceil(len(att_log_logit) * self.filter_num_or_ratio)
+            if not self.training:
+                _, topk_indices = att_log_logit.topk(K, dim=0, largest=True, sorted=False)
                 return torch.zeros_like(att_log_logit, memory_format=torch.legacy_contiguous_format).scatter_(0, topk_indices, 1.0)
             # TODO: Note the `dim`. Consider batch_size.
-            return gumbel_topk(att_log_logit, K=self.filter_num_or_ratio, hard=True, dim=0)
+            return gumbel_topk(att_log_logit, K=K, hard=True, dim=0, add_grumbel=self.add_gumbel)
         else:
             raise NotImplementedError

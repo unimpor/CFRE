@@ -11,9 +11,8 @@ class CFRE(nn.Module):
         self.llms = llm_model
         self.strategy = config['triplet2text']
         self.grad_normalize = config['grad_normalize']
-        self.warmup = config['warmup']
         self.warmup_epochs = config['warmup_epochs']
-
+        self.criterion = nn.BCEWithLogitsLoss(reduction="mean")
     @property
     def device(self):
         return list(self.parameters())[0].device
@@ -33,11 +32,11 @@ class CFRE(nn.Module):
         # attn_target = attn_logtis[relevant_idx]
         target = torch.zeros_like(attn_logtis)
         target[relevant_idx] = 1.
-        dir_loss = F.mse_loss(attn_logtis, target, reduction="mean")
+        dir_loss = self.criterion(attn_logtis, target)
 
         return dir_loss, {"dir": dir_loss.item()}
 
-    def forward_pass(self, batch, epoch):
+    def forward_pass(self, batch, epoch=None, warmup=True):
         # 2. generate mask for the coarsely retrieved samples.
         graph_batch, answer_batch, triplet_batch, triplet_batch_idx, relevant_idx_batch, question_batch, q_embd_batch = \
             batch["graph"], batch["y"], batch["triplets"], batch['triplet_batch_idx'], batch["relevant_idx"], batch["q"], batch["q_embd"]
@@ -46,20 +45,23 @@ class CFRE(nn.Module):
             graph_batch.to(self.device), q_embd_batch.to(self.device), relevant_idx_batch.to(self.device)
 
         attn_logtis, attns = self.ibtn(graph_batch, triplet_batch_idx, q_embd_batch)
-        attn_loss, loss_dict = self.__loss__(attn_logtis, relevant_idx_batch,)  # calculate attn-related loss
+        # 4. When we need to consider the loss?
+        if warmup:
+            # attn_loss, loss_dict = self.__loss__(attn_logtis, relevant_idx_batch,)  # calculate attn-related loss
+            loss, _ = self.__loss__(attn_logtis, relevant_idx_batch,)
         # 3. generate filtered retrieval results
-        loss, loss_dict["predict"] = attn_loss, 0.
-        if not self.warmup or epoch >= self.warmup_epochs:
+        # loss, loss_dict["predict"] = attn_loss, 0.
+        # if not self.warmup or epoch >= self.warmup_epochs:
             # batch_masked_triple_token_ids = self.mask_triplet(triplets, attns)
-
+        else:
             attns = [attns[triplet_batch_idx==i] for i in range(batch_size)] 
             masked_triplets_batch, masked_attns_batch = self.mask_triplet(triplet_batch, attns)
             # 4. LLM supervisions
             # outputs = self.llms.forward_pass(batch_masked_triple_token_ids, question, answer)
-            pred_loss = self.llms.forward_pass(masked_attns_batch, masked_triplets_batch, question_batch, answer_batch)
-            loss += pred_loss
-            loss_dict["predict"] = pred_loss.item()
-        return loss, loss_dict
+            loss = self.llms.forward_pass(masked_attns_batch, masked_triplets_batch, question_batch, answer_batch)
+            # loss += pred_loss
+            # loss_dict["predict"] = pred_loss.item()
+        return loss
 
     def mask_triplet(self, triplets_batch, attns_batch, ):
         """
@@ -102,7 +104,7 @@ class CFRE(nn.Module):
                 triplet_lengths = [len(tokenized_triplet["input_ids"].squeeze()) for tokenized_triplet in
                                 tokenized_triplets]
                 # TODO: we may consider batch size > 1
-                if self.grad_normalize:
+                if self.ibtn.training and self.grad_normalize:
                     attns.register_hook(create_hook(length=triplet_lengths, indices=keep_idx))
 
                 attns = torch.cat([
@@ -148,3 +150,8 @@ class CFRE(nn.Module):
                 trainable_params += num_params
 
         return trainable_params, all_param
+    
+    def freeze_llm(self):
+        # Freeze LLM parameters after some epochs
+        for _, param in self.llms.named_parameters():
+            param.requires_grad = False

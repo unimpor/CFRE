@@ -1,0 +1,31 @@
+program: main.py
+project: RAG-cwq
+entity: g-com
+name: cwq_genTest_gpt4omini
+method: grid
+metric:
+  goal: maximize
+  name: corrected/f1
+parameters:
+  prompt_mode:
+    value: scored_100
+  # frequency_penalty:
+  #   value: 0.16
+  max_tokens:
+    value: 1000
+  joint:
+    value: 0
+  undir:
+    value: 1
+  gen:
+    value: 1
+  llm_mode:
+    value: sys_icl_dm_fixed
+
+  model_name:
+    # value: meta-llama/Meta-Llama-3.1-8B-Instruct
+    value: gpt-4o-mini
+  dataset_name:
+    value: cwq
+  gpu:
+    value: "-1"

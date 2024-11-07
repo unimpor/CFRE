@@ -1,0 +1,31 @@
+program: main.py
+project: RAG-webqsp
+entity: g-com
+name: webqsp_genTest_gpt4omini
+method: grid
+metric:
+  goal: maximize
+  name: corrected/f1
+parameters:
+  prompt_mode:
+    value: scored_100
+  # frequency_penalty:
+  #   value: 0.14
+  max_tokens:
+    value: 1000
+  joint:
+    value: 0
+  undir:
+    value: 1
+  gen:
+    value: 1
+  llm_mode:
+    value: sys_icl_dm_fixed
+
+  model_name:
+    # value: meta-llama/Meta-Llama-3.1-8B-Instruct
+    value: gpt-4o-mini
+  dataset_name:
+    value: webqsp
+  gpu:
+    value: "-1"

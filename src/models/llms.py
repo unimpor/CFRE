@@ -6,7 +6,11 @@ import torch.nn as nn
 from torch.cuda.amp import autocast as autocast
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from src.utils import FORMER, LATTER, LABEL
-
+from peft import (
+    LoraConfig,
+    get_peft_model,
+    prepare_model_for_kbit_training,
+)
 IGNORE_INDEX = -100
 
 
@@ -39,7 +43,25 @@ class LLMs(nn.Module):
             print("Freezing LLAMA!")
             for _, param in model.named_parameters():
                 param.requires_grad = False
-
+        else:
+            print("Training LLAMA with LORA!")
+            model = prepare_model_for_kbit_training(model)
+            lora_r: int = 8
+            lora_alpha: int = 16
+            lora_dropout: float = 0.05
+            lora_target_modules = [
+                "q_proj",
+                "v_proj",
+            ]
+            config = LoraConfig(
+                r=lora_r,
+                lora_alpha=lora_alpha,
+                target_modules=lora_target_modules,
+                lora_dropout=lora_dropout,
+                bias="none",
+                task_type="CAUSAL_LM",
+            )
+            model = get_peft_model(model, config)
         self.model = model
         self.word_embedding = self.model.model.get_input_embeddings()
 
@@ -70,7 +92,7 @@ class LLMs(nn.Module):
             # inputs_embeds = self.word_embedding(torch.tensor(input_ids).to(self.model.device))
             former_pmt_embeds = self.word_embedding(torch.tensor(former_pmt_ids).to(self.model.device))
 
-            bm_triplet_embeds = attns[i] * self.word_embedding(bm_triplet_ids[i].to(self.model.device)) if training else \
+            bm_triplet_embeds = attns[i].to(self.model.device) * self.word_embedding(bm_triplet_ids[i].to(self.model.device)) if training else \
                                 self.word_embedding(bm_triplet_ids[i].to(self.model.device))
 
             latter_pmt_embeds = self.word_embedding(torch.tensor(latter_pmt_ids[i] + label_pmt_ids[i]).to(self.model.device))

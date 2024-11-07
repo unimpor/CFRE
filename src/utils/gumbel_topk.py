@@ -4,7 +4,7 @@ from torch.overrides import has_torch_function_unary, handle_torch_function
 Tensor = torch.Tensor
 
 
-def gumbel_topk(logits: Tensor, K: int, tau: float = 1, hard: bool = False, eps: float = 1e-10, dim: int = -1) -> Tensor:
+def gumbel_topk(logits: Tensor, K: int, tau: float = 1, hard: bool = False, eps: float = 1e-10, dim: int = -1, add_grumbel=True) -> Tensor:
     """
     Adapted this function from torch.nn.functional.gumbel_softmax.
     See https://pytorch.org/docs/stable/generated/torch.nn.functional.gumbel_softmax.html#torch.nn.functional.gumbel_softmax
@@ -15,7 +15,8 @@ def gumbel_topk(logits: Tensor, K: int, tau: float = 1, hard: bool = False, eps:
     gumbels = (
         -torch.empty_like(logits, memory_format=torch.legacy_contiguous_format).exponential_().log()
     )  # ~Gumbel(0,1)
-    gumbels = (logits + gumbels) / tau  # ~Gumbel(logits,tau)
+    gumbels = (logits + gumbels) / tau if add_grumbel else logits / tau
+    # ~Gumbel(logits,tau)
     y_soft = gumbels.softmax(dim)
 
     if hard:

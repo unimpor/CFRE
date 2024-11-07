@@ -6,6 +6,14 @@ import math
 from torch_geometric.data import Batch
 
 
+def write_log(print_str, log_file):
+    if log_file is None:
+        return
+    with open(log_file, 'a') as f:
+        f.write('\n')
+        f.write(print_str)
+
+
 def set_seed(seed):
     random.seed(seed)
     np.random.seed(seed)

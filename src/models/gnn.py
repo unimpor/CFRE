@@ -3,7 +3,8 @@ GNN Backbone. Now we only implement GraphSAGE
 """
 import torch
 import torch.nn as nn
-from torch_geometric.nn import MessagePassing
+from torch_geometric.nn import MessagePassing, PNAConv, BatchNorm, PNAConv
+import torch.nn.functional as F
 
 
 class SAGEConv(MessagePassing):
@@ -32,7 +33,6 @@ class SAGEConv(MessagePassing):
 class SAGE(nn.Module):
     def __init__(self,
                  emb_size,
-                 topic_pe,
                  num_gnn_layers,
                  aggr):
         super().__init__()
@@ -41,7 +41,6 @@ class SAGE(nn.Module):
         for _ in range(num_gnn_layers):
             self.gnn_layer_list.append(SAGEConv(emb_size, aggr))
         # TODO: Deprecated Function.
-        self.topic_pe = topic_pe
 
         # self.proj_reverse = nn.Sequential(
         #     nn.Linear(emb_size, emb_size),
@@ -50,8 +49,8 @@ class SAGE(nn.Module):
         # )
 
         self.out_size = emb_size
-        if self.topic_pe:
-            self.out_size += 2
+        # if self.topic_pe:
+        #     self.out_size += 2
 
     def forward(self,
                 edge_index,
@@ -77,3 +76,43 @@ class SAGE(nn.Module):
 
         return h_e_list
 
+
+class PNA(nn.Module):
+    def __init__(self,
+                 emb_size,
+                 num_gnn_layers,
+                 **kwargs):
+        super().__init__()
+
+        aggregators = ['mean', 'min', 'max', 'std']
+        scalers = ['identity', 'amplification', 'attenuation']
+        deg = torch.load("pna_deg.pth")
+        
+        self.gnn_layer_list = nn.ModuleList()
+        self.batch_norms = nn.ModuleList()
+        for _ in range(num_gnn_layers):
+            conv = PNAConv(in_channels=emb_size, out_channels=emb_size,
+                           aggregators=aggregators, scalers=scalers, deg=deg,
+                           edge_dim=emb_size, towers=4, pre_layers=1, post_layers=1,
+                           divide_input=True)
+            self.gnn_layer_list.append(conv)
+            self.batch_norms.append(BatchNorm(emb_size))
+
+        self.out_size = emb_size
+        # if self.topic_pe:
+        #     self.out_size += 2
+
+    def forward(self,
+                edge_index,
+                # topic_entity_one_hot,
+                h_e,
+                h_r,
+                **kwargs):
+        
+        h_e_list = []
+
+        for conv, batch_norm in zip(self.gnn_layer_list, self.batch_norms):
+            h_e = F.relu(batch_norm(conv(h_e, edge_index, h_r)))
+        h_e_list.append(h_e)
+
+        return h_e_list

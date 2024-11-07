@@ -1,5 +1,5 @@
 dataset:
-  name: 'webqsp'
+  name: &dataset 'webqsp'
   root: ./datasets
   emb_name: 'gte-large-en-v1.5'
   coarse_filter: True
@@ -14,39 +14,50 @@ llms:
   device: *device
   llm_frozen: False
   llm_model_path: meta-llama/Llama-3.2-1B-Instruct
-  llm_model_name: Llama-3.2-1B-Instruct
+  llm_model_name: &llm 'Llama-3.2-1B-Instruct'
 
 # TODO: hyper-param from G-Retriever
 train:
-  lr: 1e-5
-  wd: 0.05
-  patience: 2
+  warmup:
+    lr: 0.001
+    wd: 0.
+    num_epochs: 100
+    patience: 10
+  lr_ret: 5e-4
+  wd_ret: 0.
+  lr_llm: 1e-5
+  wd_llm: 0.05
+  num_epochs: 30
+  patience: 6
   batch_size: 2
-  grad_steps: 2
-  num_epochs: 100
+  grad_steps: 5
+  llm_frozen_epoch: 5
   
-
-log:
-  root: <TODO>
-  model_save: <TODO>
-
-
+# graphsage
 retriever:
   gnn:
-    model_type: graphsage
+    model_type: &gnn PNA
     topic_pe: False
     hidden_size: 1024
-    num_layers: 5
+    num_layers: 4
     aggr: 'mean'
     learn_non_text: False
 
 algorithm:
   filtering: topk # "topk" or "idp-bern"
-  filtering_num_or_ratio: 50 # int or float
+  filtering_num_or_ratio: 0.15 # int or float
   triplet2text: drop # "drop" or "mask"
   grad_normalize: True
-  warmup: True
-  warmup_epochs: 5
+  gumbel: True
+  warmup: False
+  warmup_epochs: 15
+
+
+logging:
+  root: ./logging
+  dataset: *dataset
+  llm: *llm
+  ret: *gnn
 
 #    # Inference
 #    parser.add_argument("--eval_batch_size", type=int, default=16)
