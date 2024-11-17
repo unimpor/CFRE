@@ -178,6 +178,7 @@ def main():
         inference(ibtn, test_loader, log_dir)
         exit(0)
     
+
     llms = LLMs(llm_config)
     cfre = RLRE(fg_retriever=ibtn, llm_model=llms, config=config['algorithm']).to(device)
 

@@ -15,7 +15,8 @@ class RLRE(nn.Module):
         self.coeff = float(config['coeff'])  # trade-off coeff between RL and regularization
         self.algo = "REINFORCE"  # the default RL algorithm
         self.reward_metrics = RewardMetrics(metrics_name=config["reward_metrics"])
-        self.perturb_per_sample = config["perturb_per_sample"]  # Use 1.
+        self.perturb_per_sample = config["perturb_per_sample"]  # Use 1. Not used in this method.
+        # TODO: We may also consider perturb_per_sample > 1
         # deprecated.
         # self.warmup_epochs = config['warmup_epochs']
         # self.criterion = nn.BCEWithLogitsLoss(reduction="mean")
