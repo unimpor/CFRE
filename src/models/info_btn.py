@@ -21,9 +21,9 @@ class FineGrainedRetriever(nn.Module):
         self.filter_num_or_ratio = filtering_num_or_ratio
         self.training = True
         self.add_gumbel = add_gumbel
+        self.current_epoch = None
         emb_size = config['hidden_size']
         model_type = config['model_type']
-
         # This is deprecated. We just use trivial non-text entity embedding.
         # if config['learn_non_text']:
         #     self.non_text_entity_emb = nn.Embedding(1, emb_size)
@@ -66,7 +66,7 @@ class FineGrainedRetriever(nn.Module):
     def set_train(self):
         self.training = True
     
-    def forward(self, batch, triplet_batch_idx, batch_q_embds):
+    def forward(self, batch, triplet_batch_idx, batch_q_embds, epoch):
         # TODO: Currently deprecate two Functions, `non_text_entity_embd` and `topic_entity_onehot`
         # if self.non_text_entity_emb is None:
         #     h_e = torch.cat([
@@ -79,6 +79,7 @@ class FineGrainedRetriever(nn.Module):
         #         self.non_text_entity_emb(torch.LongTensor([0]).to(device)).expand(
         #             num_non_text_entities, -1)
         #     ], dim=0)
+        self.current_epoch = epoch
         h_id_tensor, t_id_tensor = batch.edge_index
         # h_id_tensor, t_id_tensor = edge_index
         # add reverse for performance gain
@@ -110,22 +111,28 @@ class FineGrainedRetriever(nn.Module):
         if self.strategy == "idp-bern":
             attns = self.sampling(attn_logtis)
         elif self.strategy == "topk":
-            attns = []
+            attns_batch, sorted_idx_batch = [], []
             for idx in range(batch.num_graphs):
                 attn_logit = attn_logtis[triplet_batch_idx == idx]
-                attn = self.sampling(attn_logit)
-                attns.append(attn)
-            attns = torch.concat(attns)
+                attn, idx = self.sampling(attn_logit)
+                attns_batch.append(attn)
+                sorted_idx_batch.append(idx)
+            # attns = torch.concat(attns)
         else:
             raise NotImplementedError
-        return attn_logtis, attns
+        return attn_logtis, attns_batch, sorted_idx_batch
 
+    def get_r(self, decay_interval=1, decay_r=0.05, init_r=0.95, final_r=0.25):
+        r = init_r - self.current_epoch // decay_interval * decay_r
+        if r < final_r:
+            r = final_r
+        return r
+    
     def sampling(self, att_log_logit, temp=1):
         """
         strategy = "idp-bern" or "topk"
         K only applies when `strategy` set to "topk"
         """
-
 
         # training -- introduce stochastic
         if self.strategy == "idp-bern":
@@ -136,12 +143,20 @@ class FineGrainedRetriever(nn.Module):
             random_noise = torch.log(random_noise) - torch.log(1.0 - random_noise)
             return ((att_log_logit + random_noise) / temp).sigmoid()
         elif self.strategy == "topk":
-            K = self.filter_num_or_ratio if type(self.filter_num_or_ratio) is int \
-                else math.ceil(len(att_log_logit) * self.filter_num_or_ratio)
             if not self.training:
-                _, topk_indices = att_log_logit.topk(K, dim=0, largest=True, sorted=False)
-                return torch.zeros_like(att_log_logit, memory_format=torch.legacy_contiguous_format).scatter_(0, topk_indices, 1.0)
+                # in val or test process.
+                if self.filter_num_or_ratio is not None:
+                    K = math.ceil(len(att_log_logit) * self.filter_num_or_ratio)
+                else: 
+                    K = math.ceil(len(att_log_logit) * self.get_r())
+                # K = self.filter_num_or_ratio if type(self.filter_num_or_ratio) is int \
+                # else math.ceil(len(att_log_logit) * self.filter_num_or_ratio)
+                _, topk_indices = att_log_logit.topk(K, dim=0, largest=True, sorted=True)
+                y_hard = torch.zeros_like(att_log_logit, memory_format=torch.legacy_contiguous_format).scatter_(0, topk_indices, 1.0)
+                return y_hard, topk_indices
             # TODO: Note the `dim`. Consider batch_size.
-            return gumbel_topk(att_log_logit, K=K, hard=True, dim=0, add_grumbel=self.add_gumbel)
+            else:
+                K = math.ceil(len(att_log_logit) * self.get_r())
+                return gumbel_topk(att_log_logit, K=K, hard=True, dim=0, add_grumbel=self.add_gumbel)
         else:
             raise NotImplementedError

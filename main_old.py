@@ -7,10 +7,9 @@ import numpy as np
 from os.path import join as opj
 from tqdm import tqdm
 from cfre import CFRE
-from rlre import RLRE
 from torch.utils.data import DataLoader
 from torch.nn.utils import clip_grad_norm_
-from src.models import FineGrainedRetriever, LLMs
+from src.models import LLMs, FineGrainedRetriever
 from src.utils import collate_fn, set_seed, save_checkpoint, reload_best_model, adjust_learning_rate, setup_wp_optimizer, setup_tr_optimizer, write_log
 from src.datasets import RetrievalDataset
 
@@ -132,7 +131,6 @@ def main():
     config['algorithm']['coeff'] = args.coeff
     
     train_config = config['train']
-    llm_config = config['llms']
     warmup_config = train_config['warmup']
     algo_config = config['algorithm']
     log_config = config['logging']
@@ -152,7 +150,23 @@ def main():
     train_set = RetrievalDataset(config=config["dataset"], split='train', )
     val_set = RetrievalDataset(config=config["dataset"], split='val', )
     test_set = RetrievalDataset(config=config["dataset"], split='test', )
+    # max_degree = -1
+    # for data in train_set:
+    #     d = degree(data["graph"].edge_index[1], num_nodes=data["graph"].x.shape[0], dtype=torch.long)
+    #     max_degree = max(max_degree, int(d.max()))
+
+    # deg = torch.zeros(max_degree + 1, dtype=torch.long)
+    # for data in train_set:
+    #     d = degree(data["graph"].edge_index[1], num_nodes=data["graph"].x.shape[0], dtype=torch.long)
+    #     deg += torch.bincount(d, minlength=deg.numel())
     
+    # torch.save(deg, "pna_deg.pth")
+    # input("Done.")
+    # test_set = RetrievalDataset(config=config["dataset"], split='test', )
+    # rel_triplets = []
+    # for d in range(len(train_set)):
+    #     rel_triplets.append(len(train_set[d]['relevant_idx']))
+    # print(np.sort(rel_triplets).tolist())
     print(len(train_set), train_config['batch_size'])
     # if config['dataset']['random_split']:
     #     train_set, val_set, test_set = random_split(
@@ -178,8 +192,8 @@ def main():
         inference(ibtn, test_loader, log_dir)
         exit(0)
     
-    llms = LLMs(llm_config)
-    cfre = RLRE(fg_retriever=ibtn, llm_model=llms, config=config['algorithm']).to(device)
+    llms = LLMs(config['llms'])
+    cfre = CFRE(fg_retriever=ibtn, llm_model=llms, config=config['algorithm']).to(device)
     trainable_params, all_param = cfre.trainable_params
     print(
         f"trainable params: {trainable_params} || all params: {all_param} || trainable%: {100 * trainable_params / all_param}")

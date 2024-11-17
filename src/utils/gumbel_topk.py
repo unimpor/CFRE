@@ -21,13 +21,14 @@ def gumbel_topk(logits: Tensor, K: int, tau: float = 1, hard: bool = False, eps:
 
     if hard:
         # Straight through.
-        _, topk_indices = y_soft.topk(K, dim=dim, largest=True, sorted=False)
+        # note topk_indices also sort y_soft from large to small
+        _, topk_indices = y_soft.topk(K, dim=dim, largest=True, sorted=True)
         y_hard = torch.zeros_like(logits, memory_format=torch.legacy_contiguous_format).scatter_(dim, topk_indices, 1.0)
         ret = y_hard - y_soft.detach() + y_soft
     else:
         # Reparametrization trick.
         ret = y_soft
-    return ret
+    return ret, topk_indices
 
 
 if __name__ == '__main__':

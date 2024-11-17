@@ -3,7 +3,7 @@ import torch
 from os.path import join as opj
 
 
-def save_checkpoint(model, cur_epoch, log_dir):
+def save_checkpoint(model, cur_epoch, log_dir, filename=f"best.pth"):
     """
     Save the checkpoint at the current epoch.
     """
@@ -16,7 +16,7 @@ def save_checkpoint(model, cur_epoch, log_dir):
         "model": state_dict,
         "epoch": cur_epoch,
     }
-    path = opj(log_dir, f"best.pth")
+    path = opj(log_dir, filename)
     print("Saving checkpoint at epoch {} to {}.".format(cur_epoch, path))
     torch.save(save_obj, path)
 
