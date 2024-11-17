@@ -180,9 +180,6 @@ def main():
     
     llms = LLMs(llm_config)
     cfre = RLRE(fg_retriever=ibtn, llm_model=llms, config=config['algorithm']).to(device)
-    trainable_params, all_param = cfre.trainable_params
-    print(
-        f"trainable params: {trainable_params} || all params: {all_param} || trainable%: {100 * trainable_params / all_param}")
 
     # Set up Optimizer.
     wp_optimizer = setup_wp_optimizer(cfre, warmup_config)
