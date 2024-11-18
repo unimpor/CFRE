@@ -14,9 +14,12 @@ class RLRE(nn.Module):
         self.llms = llm_model
         self.coeff = float(config['coeff'])  # trade-off coeff between RL and regularization
         self.algo = "REINFORCE"  # the default RL algorithm
-        self.reward_metrics = RewardMetrics(metrics_name=config["reward_metrics"])
+        self.metrics_name = config["reward_metrics"]
+        self.reward_metrics = RewardMetrics(self.metrics_name)
         self.perturb_per_sample = config["perturb_per_sample"]  # Use 1. Not used in this method.
         self.regularize = config["regularize"]
+        self.baseline = torch.load("/home/comp/cscxliu/derek/CFRE/datasets/webqsp/processed/metrics.pth")
+        self.eps = 1e-5  # for numerical stability
         # TODO: We may also consider perturb_per_sample > 1
         # deprecated.
         # self.warmup_epochs = config['warmup_epochs']
@@ -26,54 +29,65 @@ class RLRE(nn.Module):
     def device(self):
         return list(self.parameters())[0].device
 
-    def reward_func(self, ):
+    def cal_rel_r(self, g_batch, q_batch, a_batch, id_batch, training):
         """
-        Given query and retrieved triplets, return the rewards.
+        Given query and retrieved triplets, return the reward rerlative to the ``baseline''.
         """
-        
-        # LLM generation
-        
-        # Calculate metrics
+        reward_batch = {
+            "F1": torch.empty(0, dtype=torch.float),
+            "precision": torch.empty(0, dtype=torch.float),
+            "recall": torch.empty(0, dtype=torch.float),
+        }
+        for g,q,a,d in zip(g_batch, q_batch, a_batch, id_batch):
+            f1, prec, recall = self.reward_metrics.calc_r(g,a,q)
+            # only the training needs relative to baselines.
+            if training:
+                baseline = self.baseline[d]
+                f1, prec, recall = f1-baseline["F1"], prec-baseline["precision"], recall-baseline["recall"]
+            reward_batch["F1"] = torch.cat((reward_batch["F1"], torch.tensor([f1])))
+            reward_batch["precision"] = torch.cat((reward_batch["precision"], torch.tensor([prec])))
+            reward_batch["recall"] = torch.cat((reward_batch["recall"], torch.tensor([recall])))
+        return reward_batch
     
     def log_prob(self, p):
         """
         Compute the expression:
         sum_{r=1}^K log(p_{i_r}) - sum_{r=1}^K log(1 - sum_{l=1}^{r-1} p_{i_l})
         """
-        return torch.log(p).sum() - torch.log(1. - torch.cumsum(p, dim=0)[:-1]).sum()
+        return torch.log(p + self.eps).sum(dim=0, keepdim=True) - torch.log(1. - torch.cumsum(p, dim=0)[:-1] + self.eps).sum(dim=0, keepdim=True)
     
     def cal_loss_warmup(self, ):
         pass
     
     def cal_loss_reinforce(self, prob_batch, r_batch):
         prob_batch = [self.log_prob(pr) for pr in prob_batch]
-        prob_batch = torch.concar(prob_batch)
-        
-        r_batch = torch.concat(r_batch)
-        
-        rl_loss = - r_batch * prob_batch
+        prob_batch = torch.cat(prob_batch)
+        r_batch = r_batch.to(self.ibtn.device)
+        assert prob_batch.shape == r_batch.shape
+        rl_loss = - (r_batch * prob_batch).mean()
         if self.regularize:
             pass
+        print(rl_loss.item())
         return rl_loss
     
-    def forward_pass(self, batch, epoch=None, warmup=False):
+    def forward_pass(self, batch, epoch=None, warmup=False, training=True):
         # 2. generate mask for the coarsely retrieved samples.
-        graph_batch, answer_batch, triplet_batch, triplet_batch_idx, relevant_idx_batch, question_batch, q_embd_batch = \
-            batch["graph"], batch["y"], batch["triplets"], batch['triplet_batch_idx'], batch["relevant_idx"], batch["q"], batch["q_embd"]
+        graph_batch, answer_batch, triplet_batch, triplet_batch_idx, relevant_idx_batch, question_batch, q_embd_batch, id_batch = \
+            batch["graph"], batch["y"], batch["triplets"], batch['triplet_batch_idx'], batch["relevant_idx"], batch["q"], batch["q_embd"], batch["id"]
         # batch_size = graph_batch.num_graphs
         graph_batch, q_embd_batch, relevant_idx_batch = \
-            graph_batch.to(self.device), q_embd_batch.to(self.device), relevant_idx_batch.to(self.device)
+            graph_batch.to(self.ibtn.device), q_embd_batch.to(self.ibtn.device), relevant_idx_batch.to(self.ibtn.device)
         # Prob_batch is used to calculate loss
         # sorted_idx_batch is used to specify the selected triplet.
-        prob_batch, _, sorted_idx_batch = self.ibtn(graph_batch, triplet_batch_idx, q_embd_batch, epoch=epoch)
-
+        prob_batch, _, sorted_idx_batch, _ = self.ibtn(graph_batch, triplet_batch_idx, q_embd_batch, epoch=epoch)
         masked_triplets_batch, _ = self.mask_triplet(triplet_batch, sorted_idx_batch)
 
         # calculate rewards relative to the baseline.
         # TODO: LLMs calc rewards
-        reward_batch = self.llms(masked_triplets_batch, question_batch, answer_batch)
-        
-        return self.cal_loss_reinforce(prob_batch, reward_batch)
+        generation_batch = self.llms(question_batch, masked_triplets_batch)
+        reward_batch = self.cal_rel_r(generation_batch, question_batch, answer_batch, id_batch, training=training)
+        reward_loogings = {k:torch.mean(v).item() for k,v in reward_batch.items()}
+        return self.cal_loss_reinforce(prob_batch, reward_batch[self.metrics_name]), reward_loogings
 
     def mask_triplet(self, triplets_batch, sorted_idx_batch):
         """

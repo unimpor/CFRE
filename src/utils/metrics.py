@@ -88,8 +88,8 @@ class RewardMetrics:
         return matched / num_ans, matched, num_ans
     
     def F1(self, matched, num_pred, num_ans):
-        precision = self.precision(matched, num_pred, num_ans)
-        recall = self.recall(matched, num_pred, num_ans)
+        precision, _, _ = self.precision(matched, num_pred, num_ans)
+        recall, _, _ = self.recall(matched, num_pred, num_ans)
         if precision + recall == 0:
             return 0, 0, 0
         return 2 * precision * recall / (precision + recall), precision, recall

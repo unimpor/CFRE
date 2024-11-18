@@ -126,9 +126,9 @@ class FineGrainedRetriever(nn.Module):
         else:
             raise NotImplementedError
         # return attn_logtis, attns_batch, sorted_idx_batch
-        return prob_batch, mask_batch, sorted_idx_batch
+        return prob_batch, mask_batch, sorted_idx_batch, attn_logtis
 
-    def get_r(self, decay_interval=1, decay_r=0.05, init_r=0.95, final_r=0.25):
+    def get_r(self, decay_interval=3, decay_r=0.1, init_r=0.9, final_r=0.3):
         r = init_r - self.current_epoch // decay_interval * decay_r
         if r < final_r:
             r = final_r

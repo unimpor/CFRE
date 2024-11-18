@@ -14,8 +14,7 @@ class LLMs(nn.Module):
         """
         super().__init__()
         self.prompt_mode = config["prompt_mode"]
-        self.model_name = config["llm_model_name"]
-        self.reward_metrics = config["reward_metrics"]
+        self.model_name = config["llm_model_name_or_path"]
         if "gpt" not in self.model_name:
             client = LLM(model=self.model_name, 
                          tensor_parallel_size=config["tensor_parallel_size"], 

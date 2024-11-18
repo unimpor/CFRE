@@ -14,7 +14,7 @@ from peft import (
 IGNORE_INDEX = -100
 
 
-class LLMs(nn.Module):
+class LLMs_old(nn.Module):
     def __init__(self, config):
         super().__init__()
 
