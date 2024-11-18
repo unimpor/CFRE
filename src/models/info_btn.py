@@ -107,20 +107,26 @@ class FineGrainedRetriever(nn.Module):
         ], dim=1)
         # attention logits for each triplet.
         attn_logtis = self.pred(h_triple).squeeze()
+        prob_batch, mask_batch, sorted_idx_batch = [], [], []
         # 0/1 attention for each triplet. Note that topk strategy should be done per sample, rather than batch.
         if self.strategy == "idp-bern":
-            attns = self.sampling(attn_logtis)
+            # attns = self.sampling(attn_logtis)
+            # deprecated feature
+            pass
         elif self.strategy == "topk":
-            attns_batch, sorted_idx_batch = [], []
-            for idx in range(batch.num_graphs):
-                attn_logit = attn_logtis[triplet_batch_idx == idx]
-                attn, idx = self.sampling(attn_logit)
-                attns_batch.append(attn)
-                sorted_idx_batch.append(idx)
+            
+            for i in range(batch.num_graphs):
+                attn_logit = attn_logtis[triplet_batch_idx == i]
+                
+                attn, sorted_idx = self.sampling(attn_logit)  # get each sample's gumbel-perturbed attention and 1's index
+                mask_batch.append(attn)
+                sorted_idx_batch.append(sorted_idx)
+                prob_batch.append(attn_logit.softmax(dim=0)[sorted_idx])
             # attns = torch.concat(attns)
         else:
             raise NotImplementedError
-        return attn_logtis, attns_batch, sorted_idx_batch
+        # return attn_logtis, attns_batch, sorted_idx_batch
+        return prob_batch, mask_batch, sorted_idx_batch
 
     def get_r(self, decay_interval=1, decay_r=0.05, init_r=0.95, final_r=0.25):
         r = init_r - self.current_epoch // decay_interval * decay_r
@@ -157,6 +163,6 @@ class FineGrainedRetriever(nn.Module):
             # TODO: Note the `dim`. Consider batch_size.
             else:
                 K = math.ceil(len(att_log_logit) * self.get_r())
-                return gumbel_topk(att_log_logit, K=K, hard=True, dim=0, add_grumbel=self.add_gumbel)
+                return gumbel_topk(att_log_logit, K=K, mode="hard", dim=0, add_grumbel=self.add_gumbel)
         else:
             raise NotImplementedError

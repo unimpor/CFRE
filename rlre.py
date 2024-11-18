@@ -16,6 +16,7 @@ class RLRE(nn.Module):
         self.algo = "REINFORCE"  # the default RL algorithm
         self.reward_metrics = RewardMetrics(metrics_name=config["reward_metrics"])
         self.perturb_per_sample = config["perturb_per_sample"]  # Use 1. Not used in this method.
+        self.regularize = config["regularize"]
         # TODO: We may also consider perturb_per_sample > 1
         # deprecated.
         # self.warmup_epochs = config['warmup_epochs']
@@ -44,8 +45,16 @@ class RLRE(nn.Module):
     def cal_loss_warmup(self, ):
         pass
     
-    def cal_loss_reinforce(self, ):
-        pass
+    def cal_loss_reinforce(self, prob_batch, r_batch):
+        prob_batch = [self.log_prob(pr) for pr in prob_batch]
+        prob_batch = torch.concar(prob_batch)
+        
+        r_batch = torch.concat(r_batch)
+        
+        rl_loss = - r_batch * prob_batch
+        if self.regularize:
+            pass
+        return rl_loss
     
     def forward_pass(self, batch, epoch=None, warmup=False):
         # 2. generate mask for the coarsely retrieved samples.
@@ -54,18 +63,19 @@ class RLRE(nn.Module):
         # batch_size = graph_batch.num_graphs
         graph_batch, q_embd_batch, relevant_idx_batch = \
             graph_batch.to(self.device), q_embd_batch.to(self.device), relevant_idx_batch.to(self.device)
+        # Prob_batch is used to calculate loss
+        # sorted_idx_batch is used to specify the selected triplet.
+        prob_batch, _, sorted_idx_batch = self.ibtn(graph_batch, triplet_batch_idx, q_embd_batch, epoch=epoch)
 
-        attn_logtis, attns_batch, sorted_idx_batch = self.ibtn(graph_batch, triplet_batch_idx, q_embd_batch, epoch=epoch)
+        masked_triplets_batch, _ = self.mask_triplet(triplet_batch, sorted_idx_batch)
 
-        masked_triplets_batch, masked_attns_batch = self.mask_triplet(triplet_batch, attns_batch, sorted_idx_batch)
-        # 4. LLM supervisions
-        # outputs = self.llms.forward_pass(batch_masked_triple_token_ids, question, answer)
-        pred_loss = self.llms.forward_pass(masked_attns_batch, masked_triplets_batch, question_batch, answer_batch)
-        loss += self.coeff * pred_loss
+        # calculate rewards relative to the baseline.
+        # TODO: LLMs calc rewards
+        reward_batch = self.llms(masked_triplets_batch, question_batch, answer_batch)
+        
+        return self.cal_loss_reinforce(prob_batch, reward_batch)
 
-        return loss
-
-    def mask_triplet(self, triplets_batch, attns_batch, sorted_idx_batch):
+    def mask_triplet(self, triplets_batch, sorted_idx_batch):
         """
         `strategy` can be set as "drop" or "mask", "drop" as default.
         Mask tokenized triplets using attn
@@ -75,33 +85,15 @@ class RLRE(nn.Module):
         # Example: triplets converted into strings
 
         # Load the tokenizer
-        
-
         def triplet_to_str(triplet):
             return f"({triplet[0]},{triplet[1]},{triplet[2]})"
         # Tokenize each triplet string
-
-
         masked_attns_batch, masked_triplets_batch = [], []
-        for triplets, attns, keep_idx in zip(triplets_batch, attns_batch, sorted_idx_batch):
+        for triplets, keep_idx in zip(triplets_batch, sorted_idx_batch):
         # In this strategy, just drop the unselected triplets.
-            assert len(triplets) == attns.shape[0]
             # keep_idx = [idx for idx, score in enumerate(attns) if score.item() == 1]
-            
-            tokenized_triplets = [self.llms.tokenizer(triplet_to_str(triplets[idx]), return_tensors="pt")
-                                for idx in keep_idx]
-            triplets_token_ids = torch.cat(
-                [tokenized_triplet["input_ids"].squeeze() for tokenized_triplet in tokenized_triplets]).to(self.device)
-
-            triplet_lengths = [len(tokenized_triplet["input_ids"].squeeze()) for tokenized_triplet in
-                            tokenized_triplets]
-            # TODO: we may consider batch size > 1
-            attns_exp = torch.cat([
-                attns[idx].expand(length) for idx, length in zip(keep_idx, triplet_lengths)
-            ]).unsqueeze(1)  # expand and cut.
-            
-            masked_attns_batch.append(attns_exp)
-            masked_triplets_batch.append(triplets_token_ids)
+            select_triplets = [triplet_to_str(triplets[idx]) for idx in keep_idx]
+            masked_triplets_batch.append(select_triplets)
             # assert attns.shape == triplets_token_ids.shape
             # masked_token_ids = attns * triplets_token_ids
         return masked_triplets_batch, masked_attns_batch

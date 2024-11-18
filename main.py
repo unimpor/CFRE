@@ -191,7 +191,7 @@ def main():
     if args.proj_name == "warmup":
         train(warmup_config["num_epochs"], warmup_config["patience"], cfre, train_loader, val_loader, wp_optimizer, log_dir, warmup=True)
     else:
-        train(train_config["num_epochs"], train_config["patience"], cfre, train_loader, val_loader, optimizer, log_dir, warmup=False, llm_frozen_epoch=args.llm_frozen_epoch)
+        train(train_config["num_epochs"], train_config["patience"], cfre, train_loader, val_loader, optimizer, log_dir, warmup=False)
     # /home/comp/cscxliu/derek/CFRE/logging/webqsp/Llama-3.2-1B-Instruct/PNA/lora_gumbel
 
 if __name__ == '__main__':

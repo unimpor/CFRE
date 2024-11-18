@@ -63,6 +63,7 @@ algorithm:
   coeff: 0.1
   reward_metrics: F1
   perturb_per_sample: 1
+  regularize: null
 
 
 logging:
