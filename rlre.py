@@ -59,15 +59,27 @@ class RLRE(nn.Module):
     def cal_loss_warmup(self, ):
         pass
     
+    def r_post_process(self, a, alpha=0.02, beta=-0.01):
+
+        a = torch.where(a >= 0, a + alpha, a)
+        # a = torch.where((a >= beta) & (a < 0), torch.zeros_like(a), a)
+        return a
+    
+    def cal_loss_regularize(self, id_batch, logits_batch):
+        loss = torch.empty(0, dtype=torch.float, device=self.ibtn.device)
+        for sample_id, attn in zip(id_batch, logits_batch):
+            P = attn.softmax(dim=0)
+            Q = self.baseline[sample_id]["logits"].softmax(dim=0).to(self.ibtn.device)
+            loss = torch.cat((loss, torch.sum(P * (torch.log(P+self.eps)-torch.log(Q+self.eps)), dim=0, keepdim=True)))
+        return loss.mean()
+        
     def cal_loss_reinforce(self, prob_batch, r_batch):
         prob_batch = [self.log_prob(pr) for pr in prob_batch]
         prob_batch = torch.cat(prob_batch)
-        r_batch = r_batch.to(self.ibtn.device)
+        r_batch = self.r_post_process(r_batch).to(self.ibtn.device)
         assert prob_batch.shape == r_batch.shape
         rl_loss = - (r_batch * prob_batch).mean()
-        if self.regularize:
-            pass
-        print(rl_loss.item())
+
         return rl_loss
     
     def forward_pass(self, batch, epoch=None, warmup=False, training=True):
@@ -79,7 +91,7 @@ class RLRE(nn.Module):
             graph_batch.to(self.ibtn.device), q_embd_batch.to(self.ibtn.device), relevant_idx_batch.to(self.ibtn.device)
         # Prob_batch is used to calculate loss
         # sorted_idx_batch is used to specify the selected triplet.
-        prob_batch, _, sorted_idx_batch, _ = self.ibtn(graph_batch, triplet_batch_idx, q_embd_batch, epoch=epoch)
+        prob_batch, _, sorted_idx_batch, logits_batch = self.ibtn(graph_batch, triplet_batch_idx, q_embd_batch, epoch=epoch)
         masked_triplets_batch, _ = self.mask_triplet(triplet_batch, sorted_idx_batch)
 
         # calculate rewards relative to the baseline.
@@ -87,7 +99,15 @@ class RLRE(nn.Module):
         generation_batch = self.llms(question_batch, masked_triplets_batch)
         reward_batch = self.cal_rel_r(generation_batch, question_batch, answer_batch, id_batch, training=training)
         reward_loogings = {k:torch.mean(v).item() for k,v in reward_batch.items()}
-        return self.cal_loss_reinforce(prob_batch, reward_batch[self.metrics_name]), reward_loogings
+        loss = self.coeff * self.cal_loss_reinforce(prob_batch, reward_batch[self.metrics_name])
+        reward_loogings["reinforce"] = loss.item()
+        if self.regularize and training:
+            # only training calculates regularization
+            KL_reg = self.cal_loss_regularize(id_batch, logits_batch)
+            loss += KL_reg
+            reward_loogings["KL"] = KL_reg.item()
+        print(loss, reward_loogings)
+        return loss, reward_loogings
 
     def mask_triplet(self, triplets_batch, sorted_idx_batch):
         """

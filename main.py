@@ -23,8 +23,8 @@ def inference(model, test_loader, log_dir):
     result = []
     with torch.no_grad():
         for _, batch in enumerate(test_loader):
-            graph_batch, answer_batch, triplet_batch, triplet_batch_idx, relevant_idx_batch, question_batch, q_embd_batch = \
-            batch["graph"], batch["y"], batch["triplets"], batch['triplet_batch_idx'], batch["relevant_idx"], batch["q"], batch["q_embd"]
+            graph_batch, answer_batch, triplet_batch, triplet_batch_idx, relevant_idx_batch, question_batch, q_embd_batch, id_batch = \
+            batch["graph"], batch["y"], batch["triplets"], batch['triplet_batch_idx'], batch["relevant_idx"], batch["q"], batch["q_embd"], batch["id"]
 
             graph_batch, q_embd_batch, relevant_idx_batch = \
                 graph_batch.to(model.device), q_embd_batch.to(model.device), relevant_idx_batch.to(model.device)
@@ -32,7 +32,7 @@ def inference(model, test_loader, log_dir):
             _, _, _, attn_logtis = model(graph_batch, triplet_batch_idx, q_embd_batch, 0)
             result.append({
                 "q": question_batch[0],
-                "logit": attn_logtis,
+                "logit": attn_logtis[0],
             })
     assert len(test_loader) == len(result)
     torch.save(result, opj(log_dir, "inference.pth"))    

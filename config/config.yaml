@@ -16,7 +16,7 @@ llms:
   llm_frozen: False
   # llm_model_path: meta-llama/Llama-3.2-1B-Instruct
   llm_model_name_or_path: &llm 'meta-llama/Meta-Llama-3.1-8B-Instruct' # optional: gpt-4o-mini
-  tensor_parallel_size: 1
+  tensor_parallel_size: 2
   max_seq_len_to_capture: 16384 
   max_tokens: 4000 
   seed: 0 
@@ -32,15 +32,15 @@ train:
     wd: 0.
     num_epochs: 100
     patience: 10
-  lr_ret: 5e-4
+  lr_ret: 0.001
   wd_ret: 0.
-  lr_llm: 1e-5
-  wd_llm: 0.05
-  num_epochs: 30
+  lr_llm: 1e-5  # deprecated
+  wd_llm: 0.05  # deprecated
+  num_epochs: 50
   patience: 6
-  batch_size: 1
-  grad_steps: 5
-  llm_frozen_epoch: 5
+  batch_size: 32
+  grad_steps: 5 # deprecated
+  llm_frozen_epoch: 5 # deprecated
   
 # graphsage
 retriever:
@@ -54,7 +54,7 @@ retriever:
 
 algorithm:
   filtering: topk # "topk" or "idp-bern"
-  filtering_num_or_ratio: 0.25 # int or float
+  filtering_num_or_ratio: 0.3 # int or float
   triplet2text: drop # "drop" or "mask"
   grad_normalize: True
   gumbel: True
@@ -63,7 +63,7 @@ algorithm:
   coeff: 0.1
   reward_metrics: F1
   perturb_per_sample: 1
-  regularize: null
+  regularize: "KL"
 
 
 logging:

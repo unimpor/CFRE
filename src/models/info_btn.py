@@ -107,7 +107,7 @@ class FineGrainedRetriever(nn.Module):
         ], dim=1)
         # attention logits for each triplet.
         attn_logtis = self.pred(h_triple).squeeze()
-        prob_batch, mask_batch, sorted_idx_batch = [], [], []
+        prob_batch, mask_batch, sorted_idx_batch, logits_batch = [], [], [], []
         # 0/1 attention for each triplet. Note that topk strategy should be done per sample, rather than batch.
         if self.strategy == "idp-bern":
             # attns = self.sampling(attn_logtis)
@@ -117,7 +117,7 @@ class FineGrainedRetriever(nn.Module):
             
             for i in range(batch.num_graphs):
                 attn_logit = attn_logtis[triplet_batch_idx == i]
-                
+                logits_batch.append(attn_logit)
                 attn, sorted_idx = self.sampling(attn_logit)  # get each sample's gumbel-perturbed attention and 1's index
                 mask_batch.append(attn)
                 sorted_idx_batch.append(sorted_idx)
@@ -126,7 +126,7 @@ class FineGrainedRetriever(nn.Module):
         else:
             raise NotImplementedError
         # return attn_logtis, attns_batch, sorted_idx_batch
-        return prob_batch, mask_batch, sorted_idx_batch, attn_logtis
+        return prob_batch, mask_batch, sorted_idx_batch, logits_batch
 
     def get_r(self, decay_interval=3, decay_r=0.1, init_r=0.9, final_r=0.3):
         r = init_r - self.current_epoch // decay_interval * decay_r
