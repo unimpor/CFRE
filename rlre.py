@@ -19,7 +19,10 @@ class RLRE(nn.Module):
         self.perturb_per_sample = config["perturb_per_sample"]  # Use 1. Not used in this method.
         self.regularize = config["regularize"]
         self.baseline = torch.load("/home/comp/cscxliu/derek/CFRE/datasets/webqsp/processed/metrics.pth")
+        self.baseline_cache = {}
+        self.set_moving_baseline = config["set_moving_baseline"]
         self.eps = 1e-5  # for numerical stability
+        self.tau = float(config["tau"])  # for building distribution
         # TODO: We may also consider perturb_per_sample > 1
         # deprecated.
         # self.warmup_epochs = config['warmup_epochs']
@@ -41,6 +44,8 @@ class RLRE(nn.Module):
         for g,q,a,d in zip(g_batch, q_batch, a_batch, id_batch):
             f1, prec, recall = self.reward_metrics.calc_r(g,a,q)
             # only the training needs relative to baselines.
+            if self.set_moving_baseline and training:
+                self.baseline_cache[d] = {'F1': f1, 'precision': prec, 'recall': recall}
             if training:
                 baseline = self.baseline[d]
                 f1, prec, recall = f1-baseline["F1"], prec-baseline["precision"], recall-baseline["recall"]
@@ -59,17 +64,18 @@ class RLRE(nn.Module):
     def cal_loss_warmup(self, ):
         pass
     
-    def r_post_process(self, a, alpha=0.02, beta=-0.01):
-
+    def r_post_process(self, a, alpha=0.005, beta=-0.01):
+        
         a = torch.where(a >= 0, a + alpha, a)
+        # a = torch.where(a < 0, torch.zeros_like(a), a)
         # a = torch.where((a >= beta) & (a < 0), torch.zeros_like(a), a)
         return a
     
     def cal_loss_regularize(self, id_batch, logits_batch):
         loss = torch.empty(0, dtype=torch.float, device=self.ibtn.device)
         for sample_id, attn in zip(id_batch, logits_batch):
-            P = attn.softmax(dim=0)
-            Q = self.baseline[sample_id]["logits"].softmax(dim=0).to(self.ibtn.device)
+            P = (attn / self.tau).softmax(dim=0)
+            Q = (self.baseline[sample_id]["logits"] / self.tau).softmax(dim=0).to(self.ibtn.device)
             loss = torch.cat((loss, torch.sum(P * (torch.log(P+self.eps)-torch.log(Q+self.eps)), dim=0, keepdim=True)))
         return loss.mean()
         
@@ -79,7 +85,6 @@ class RLRE(nn.Module):
         r_batch = self.r_post_process(r_batch).to(self.ibtn.device)
         assert prob_batch.shape == r_batch.shape
         rl_loss = - (r_batch * prob_batch).mean()
-
         return rl_loss
     
     def forward_pass(self, batch, epoch=None, warmup=False, training=True):
@@ -98,16 +103,19 @@ class RLRE(nn.Module):
         # TODO: LLMs calc rewards
         generation_batch = self.llms(question_batch, masked_triplets_batch)
         reward_batch = self.cal_rel_r(generation_batch, question_batch, answer_batch, id_batch, training=training)
-        reward_loogings = {k:torch.mean(v).item() for k,v in reward_batch.items()}
+        reward_loggings = {k:torch.mean(v).item() for k,v in reward_batch.items()}
         loss = self.coeff * self.cal_loss_reinforce(prob_batch, reward_batch[self.metrics_name])
-        reward_loogings["reinforce"] = loss.item()
+        reward_loggings["reinforce"] = loss.item()
         if self.regularize and training:
             # only training calculates regularization
-            KL_reg = self.cal_loss_regularize(id_batch, logits_batch)
-            loss += KL_reg
-            reward_loogings["KL"] = KL_reg.item()
-        print(loss, reward_loogings)
-        return loss, reward_loogings
+            KL_reg_loss = self.coeff * self.cal_loss_regularize(id_batch, logits_batch)
+            loss += KL_reg_loss
+            reward_loggings["KL"] = KL_reg_loss.item()
+        # print(loss, reward_loggings)
+        if self.set_moving_baseline and training:
+            for d, attn in zip(id_batch, logits_batch):
+                self.baseline_cache[d]["logits"] = attn.detach().cpu().clone()
+        return loss, reward_loggings
 
     def mask_triplet(self, triplets_batch, sorted_idx_batch):
         """

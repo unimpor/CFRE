@@ -11,17 +11,16 @@ from src.utils import gumbel_topk
 class FineGrainedRetriever(nn.Module):
     def __init__(self,
                  config,
-                 filtering_strategy,
-                 filtering_num_or_ratio,
-                 add_gumbel=True,
+                 algo_config,
                  **kwargs):
         super().__init__()
 
-        self.strategy = filtering_strategy  # strategy of filtering irrelevant info
-        self.filter_num_or_ratio = filtering_num_or_ratio
+        self.strategy = algo_config["filtering"]  # strategy of filtering irrelevant info
+        self.filter_num_or_ratio = algo_config["filtering_num_or_ratio"]
         self.training = True
-        self.add_gumbel = add_gumbel
+        self.add_gumbel = algo_config["gumbel"]
         self.current_epoch = None
+        self.tau = float(algo_config["tau"])
         emb_size = config['hidden_size']
         model_type = config['model_type']
         # This is deprecated. We just use trivial non-text entity embedding.
@@ -121,7 +120,7 @@ class FineGrainedRetriever(nn.Module):
                 attn, sorted_idx = self.sampling(attn_logit)  # get each sample's gumbel-perturbed attention and 1's index
                 mask_batch.append(attn)
                 sorted_idx_batch.append(sorted_idx)
-                prob_batch.append(attn_logit.softmax(dim=0)[sorted_idx])
+                prob_batch.append((attn_logit / self.tau).softmax(dim=0)[sorted_idx])
             # attns = torch.concat(attns)
         else:
             raise NotImplementedError
@@ -163,6 +162,6 @@ class FineGrainedRetriever(nn.Module):
             # TODO: Note the `dim`. Consider batch_size.
             else:
                 K = math.ceil(len(att_log_logit) * self.get_r())
-                return gumbel_topk(att_log_logit, K=K, mode="hard", dim=0, add_grumbel=self.add_gumbel)
+                return gumbel_topk(att_log_logit, K=K, tau=self.tau, mode="hard", dim=0, add_grumbel=self.add_gumbel)
         else:
             raise NotImplementedError

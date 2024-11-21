@@ -16,7 +16,7 @@ llms:
   llm_frozen: False
   # llm_model_path: meta-llama/Llama-3.2-1B-Instruct
   llm_model_name_or_path: &llm 'meta-llama/Meta-Llama-3.1-8B-Instruct' # optional: gpt-4o-mini
-  tensor_parallel_size: 2
+  tensor_parallel_size: 1
   max_seq_len_to_capture: 16384 
   max_tokens: 4000 
   seed: 0 
@@ -54,7 +54,7 @@ retriever:
 
 algorithm:
   filtering: topk # "topk" or "idp-bern"
-  filtering_num_or_ratio: 0.3 # int or float
+  filtering_num_or_ratio: 0.2 # int or float
   triplet2text: drop # "drop" or "mask"
   grad_normalize: True
   gumbel: True
@@ -64,6 +64,8 @@ algorithm:
   reward_metrics: F1
   perturb_per_sample: 1
   regularize: "KL"
+  set_moving_baseline: False
+  tau: 2.0
 
 
 logging:

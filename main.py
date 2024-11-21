@@ -42,10 +42,10 @@ def inference(model, test_loader, log_dir):
 def train(num_epochs, patience, cfre, train_loader, val_loader, optimizer, log_dir, warmup=True, **kwargs):
     best_val_signal = -1.
     loggings = opj(log_dir, "logging.txt")
-    for epoch in tqdm(range(num_epochs)):
-                
+    for epoch in tqdm(range(num_epochs)):        
         cfre.train()
         cfre.ibtn.set_train()
+        cfre.baseline_cache = {}  # set empty to baseline cache at the start of every epoch.
         epoch_loss, accum_loss, val_loss = 0., 0., 0.
         all_loss_dict, all_loss_dict_val = {}, {}
         for step, batch in enumerate(train_loader):
@@ -55,6 +55,7 @@ def train(num_epochs, patience, cfre, train_loader, val_loader, optimizer, log_d
             loss.backward()
             for k, v in loss_dict.items():
                 all_loss_dict[k] = all_loss_dict.get(k, 0) + v
+            clip_grad_norm_(optimizer.param_groups[0]['params'], 0.1)
             optimizer.step()
             epoch_loss = epoch_loss + loss.item()
 
@@ -62,7 +63,6 @@ def train(num_epochs, patience, cfre, train_loader, val_loader, optimizer, log_d
         for k, v in all_loss_dict.items():
             all_loss_dict[k] = v / len(train_loader)
         write_log(f"Epoch: {epoch}|{num_epochs}. Train Loss: {train_loss}" + str(all_loss_dict), loggings)
-        # wandb.log({'Train Loss (Epoch Mean)': epoch_loss / len(train_loader)})
 
         cfre.eval()
         cfre.ibtn.set_eval()
@@ -84,6 +84,8 @@ def train(num_epochs, patience, cfre, train_loader, val_loader, optimizer, log_d
             # save fg retriever
             save_checkpoint(cfre.ibtn, epoch, log_dir)
             best_epoch = epoch
+            # if epoch > 0:
+            #     cfre.baseline = cfre.baseline_cache  # update baseline to moving baseline
         
         write_log(f'Epoch {epoch} Val Loss {val_loss} Best Val signal {best_val_signal} Best Epoch {best_epoch}', loggings)
 
@@ -102,17 +104,23 @@ def main():
     parser.add_argument('--mode', type=str, default="inference")
     parser.add_argument('--gnn', type=str, default="PNA")
     parser.add_argument('--coeff', type=float, default=0.1)
+    parser.add_argument('--tau', type=float, default=1)
     parser.add_argument('--llm_frozen_epoch', type=int, default=None)
     args = parser.parse_args()
     
     config = yaml.safe_load(open(args.config_path, 'r'))
     config['algorithm']['coeff'] = args.coeff
-    
+    config['algorithm']['tau'] = args.tau
     train_config = config['train']
     llm_config = config['llms']
     warmup_config = train_config['warmup']
     algo_config = config['algorithm']
     log_config = config['logging']
+    device = torch.device(f"cuda:{args.device}")
+    
+    if llm_config["tensor_parallel_size"] == 1:
+        os.environ["CUDA_VISIBLE_DEVICES"] = f"{args.device}"
+        device = torch.device(f"cuda:0")
     # log_config["ret"] = args.gnn
     # config["retriever"]["gnn"]["model_type"] = args.gnn
     # if args.gnn == "graphsage":
@@ -120,7 +128,7 @@ def main():
     proj_root = opj(log_config["root"], log_config["dataset"], log_config["llm"].split('/')[-1], log_config["ret"])
     log_dir = opj(proj_root, args.proj_name)
     os.makedirs(log_dir, exist_ok=True)
-    device = torch.device(f"cuda:{args.device}")
+    
     # wandb.init(project=f"",
     #            name=f"",
     #            config=config)
@@ -135,18 +143,14 @@ def main():
     #     train_set, val_set, test_set = random_split(
     #         train_set, val_set, test_set, config['env']['seed'])
 
-    train_loader = DataLoader(train_set, batch_size=train_config['batch_size'], shuffle=True, collate_fn=collate_fn, drop_last=True)
+    train_loader = DataLoader(train_set, batch_size=train_config['batch_size'], shuffle=True, collate_fn=collate_fn, drop_last=False)
     val_loader = DataLoader(val_set, batch_size=train_config['batch_size'], collate_fn=collate_fn)
     test_loader = DataLoader(test_set, batch_size=1, collate_fn=collate_fn)
     # Build Model. Load ibtn, llms, cfre.
 
-    ibtn = FineGrainedRetriever(config=config['retriever']['gnn'],
-                                filtering_strategy=algo_config['filtering'],
-                                filtering_num_or_ratio=algo_config['filtering_num_or_ratio'],
-                                add_gumbel=algo_config['gumbel']
-                                ).to(device)
+    ibtn = FineGrainedRetriever(config['retriever']['gnn'], algo_config).to(device)
     if args.proj_name != "warmup":
-        wp_retriever = torch.load("./logging/webqsp/Llama-3.2-1B-Instruct/PNA/warmup/best.pth")["model"]
+        wp_retriever = torch.load("./logging/webqsp/Llama-3.2-1B-Instruct/PNA/warmup/best.pth", map_location=device)["model"]
         ibtn.load_state_dict(wp_retriever)
     # if args.mode == "inference" and os.path.exists(opj(log_dir, "best.pth")):
     #     print("Load Inference model..")
