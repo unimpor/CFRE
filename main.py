@@ -29,7 +29,7 @@ def inference(model, test_loader, log_dir):
             graph_batch, q_embd_batch, relevant_idx_batch = \
                 graph_batch.to(model.device), q_embd_batch.to(model.device), relevant_idx_batch.to(model.device)
 
-            _, _, _, attn_logtis = model(graph_batch, triplet_batch_idx, q_embd_batch, 0)
+            _, _, _, _, attn_logtis = model(graph_batch, triplet_batch_idx, q_embd_batch, 0)
             result.append({
                 "q": question_batch[0],
                 "logit": attn_logtis[0],
