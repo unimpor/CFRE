@@ -157,6 +157,7 @@ class FineGrainedRetriever(nn.Module):
         elif self.strategy == "topk":
             if not self.training:
                 # in val or test process.
+                print(self.get_r())
                 if self.filter_num_or_ratio is not None:
                     K = math.ceil(len(att_log_logit) * self.filter_num_or_ratio)
                 else: 

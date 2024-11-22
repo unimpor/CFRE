@@ -12,7 +12,8 @@ class RLRE(nn.Module):
         super().__init__()
         self.ibtn = fg_retriever
         self.llms = llm_model
-        self.coeff = float(config['coeff'])  # trade-off coeff between RL and regularization
+        self.coeff1 = float(config['coeff1'])  # trade-off coeff between RL and regularization
+        self.coeff2 = float(config['coeff2'])
         self.algo = "REINFORCE"  # the default RL algorithm
         self.metrics_name = config["reward_metrics"]
         self.reward_metrics = RewardMetrics(self.metrics_name)
@@ -23,6 +24,7 @@ class RLRE(nn.Module):
         self.set_moving_baseline = config["set_moving_baseline"]
         self.eps = 1e-5  # for numerical stability
         self.tau = float(config["tau"])  # for building distribution
+        self.criterion = nn.BCEWithLogitsLoss(reduction="mean")
         # TODO: We may also consider perturb_per_sample > 1
         # deprecated.
         # self.warmup_epochs = config['warmup_epochs']
@@ -67,14 +69,19 @@ class RLRE(nn.Module):
         """
         return torch.log(p + self.eps).sum(dim=0, keepdim=True)
     
-    def cal_loss_warmup(self, ):
-        pass
+    def cal_loss_warmup(self, attn_logtis, relevant_idx):
+        target = torch.zeros_like(attn_logtis)
+        target[relevant_idx] = 1.
+        dir_loss = self.criterion(attn_logtis, target)
+        return dir_loss
     
-    def r_post_process(self, a, alpha=0.005, beta=-0.01):
-        
+    def r_post_process(self, a, alpha=0.005, beta=-0.15):
+        # TODO: needs to modify
         a = torch.where(a >= 0, a + alpha, a)
+        # a = torch.where(a < 0, -a, a)
+        # constant-ratio
         # a = torch.where(a < 0, torch.zeros_like(a), a)
-        # a = torch.where((a >= beta) & (a < 0), torch.zeros_like(a), a)
+        a = torch.where((a >= beta) & (a < 0), torch.zeros_like(a), a)
         return a
     
     def cal_loss_regularize(self, id_batch, logits_batch):
@@ -86,8 +93,8 @@ class RLRE(nn.Module):
         return loss.mean()
         
     def cal_loss_reinforce(self, prob_batch, dropped_prob_batch, r_batch):
-        # version 2
-        prob_batch = [self.log_prob(pr) for pr in prob_batch]
+        # version 2 -- constant ratio
+        prob_batch = [self.log_prob_ordered_sampling(pr) for pr in prob_batch]
         # version 1
         # prob_batch = [self.log_prob_ordered_sampling(pr) if r>=0 else self.log_prob_(dpr) for pr, dpr, r in zip(prob_batch, dropped_prob_batch, r_batch)]
         prob_batch = torch.cat(prob_batch)
@@ -105,7 +112,7 @@ class RLRE(nn.Module):
             graph_batch.to(self.ibtn.device), q_embd_batch.to(self.ibtn.device), relevant_idx_batch.to(self.ibtn.device)
         # Prob_batch is used to calculate loss
         # sorted_idx_batch is used to specify the selected triplet.
-        prob_batch, _, sorted_idx_batch, logits_batch = self.ibtn(graph_batch, triplet_batch_idx, q_embd_batch, epoch=epoch)
+        prob_batch, dropped_prob_batch, _, sorted_idx_batch, logits_batch = self.ibtn(graph_batch, triplet_batch_idx, q_embd_batch, epoch=epoch)
         masked_triplets_batch, _ = self.mask_triplet(triplet_batch, sorted_idx_batch)
 
         # calculate rewards relative to the baseline.
@@ -113,13 +120,17 @@ class RLRE(nn.Module):
         generation_batch = self.llms(question_batch, masked_triplets_batch)
         reward_batch = self.cal_rel_r(generation_batch, question_batch, answer_batch, id_batch, training=training)
         reward_loggings = {k:torch.mean(v).item() for k,v in reward_batch.items()}
-        loss = self.coeff * self.cal_loss_reinforce(prob_batch, reward_batch[self.metrics_name])
+        loss = self.coeff1 * self.cal_loss_reinforce(prob_batch, dropped_prob_batch, reward_batch[self.metrics_name])
         reward_loggings["reinforce"] = loss.item()
         if self.regularize and training:
             # only training calculates regularization
-            KL_reg_loss = self.coeff * self.cal_loss_regularize(id_batch, logits_batch)
+            KL_reg_loss = self.coeff2 * self.cal_loss_regularize(id_batch, logits_batch)
             loss += KL_reg_loss
             reward_loggings["KL"] = KL_reg_loss.item()
+        if not self.regularize and training:
+            wp_loss = self.coeff2 * self.cal_loss_warmup(torch.concat(logits_batch, dim=0), relevant_idx_batch)
+            loss += wp_loss
+            reward_loggings["wp"] = wp_loss.item()
         # print(loss, reward_loggings)
         if self.set_moving_baseline and training:
             for d, attn in zip(id_batch, logits_batch):

@@ -103,13 +103,15 @@ def main():
     parser.add_argument('--proj_name', type=str, default="lora_w.o.gumbel")
     parser.add_argument('--mode', type=str, default="inference")
     parser.add_argument('--gnn', type=str, default="PNA")
-    parser.add_argument('--coeff', type=float, default=0.1)
+    parser.add_argument('--coeff1', type=float, default=0.1)
+    parser.add_argument('--coeff2', type=float, default=0.1)
     parser.add_argument('--tau', type=float, default=1)
     parser.add_argument('--llm_frozen_epoch', type=int, default=None)
     args = parser.parse_args()
     
     config = yaml.safe_load(open(args.config_path, 'r'))
-    config['algorithm']['coeff'] = args.coeff
+    config['algorithm']['coeff1'] = args.coeff1
+    config['algorithm']['coeff2'] = args.coeff2
     config['algorithm']['tau'] = args.tau
     train_config = config['train']
     llm_config = config['llms']
