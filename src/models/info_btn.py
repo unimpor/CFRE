@@ -20,7 +20,7 @@ class FineGrainedRetriever(nn.Module):
         self.training = True
         self.add_gumbel = algo_config["gumbel"]
         self.current_epoch = None
-        self.constant_ratio = config["constant_ratio"]
+        self.constant_ratio = algo_config["constant_ratio"]
         self.tau = float(algo_config["tau"])
         emb_size = config['hidden_size']
         model_type = config['model_type']
