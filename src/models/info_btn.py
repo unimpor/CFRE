@@ -20,6 +20,7 @@ class FineGrainedRetriever(nn.Module):
         self.training = True
         self.add_gumbel = algo_config["gumbel"]
         self.current_epoch = None
+        self.constant_ratio = config["constant_ratio"]
         self.tau = float(algo_config["tau"])
         emb_size = config['hidden_size']
         model_type = config['model_type']
@@ -106,7 +107,7 @@ class FineGrainedRetriever(nn.Module):
         ], dim=1)
         # attention logits for each triplet.
         attn_logtis = self.pred(h_triple).squeeze()
-        prob_batch, mask_batch, sorted_idx_batch, logits_batch = [], [], [], []
+        prob_batch, dropped_prob_batch, mask_batch, sorted_idx_batch, logits_batch = [], [], [], [], []
         # 0/1 attention for each triplet. Note that topk strategy should be done per sample, rather than batch.
         if self.strategy == "idp-bern":
             # attns = self.sampling(attn_logtis)
@@ -116,18 +117,24 @@ class FineGrainedRetriever(nn.Module):
             
             for i in range(batch.num_graphs):
                 attn_logit = attn_logtis[triplet_batch_idx == i]
-                logits_batch.append(attn_logit)
+                attn_prob = (attn_logit / self.tau).softmax(dim=0) 
                 attn, sorted_idx = self.sampling(attn_logit)  # get each sample's gumbel-perturbed attention and 1's index
+                dropped_idx = torch.nonzero(attn==0).squeeze()
+                
+                logits_batch.append(attn_logit)
                 mask_batch.append(attn)
                 sorted_idx_batch.append(sorted_idx)
-                prob_batch.append((attn_logit / self.tau).softmax(dim=0)[sorted_idx])
+                prob_batch.append(attn_prob[sorted_idx])
+                dropped_prob_batch.append(attn_prob[dropped_idx])
             # attns = torch.concat(attns)
         else:
             raise NotImplementedError
         # return attn_logtis, attns_batch, sorted_idx_batch
-        return prob_batch, mask_batch, sorted_idx_batch, logits_batch
+        return prob_batch, dropped_prob_batch, mask_batch, sorted_idx_batch, logits_batch
 
     def get_r(self, decay_interval=3, decay_r=0.1, init_r=0.9, final_r=0.3):
+        if self.constant_ratio:
+            return self.constant_ratio
         r = init_r - self.current_epoch // decay_interval * decay_r
         if r < final_r:
             r = final_r

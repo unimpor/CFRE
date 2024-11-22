@@ -42,7 +42,7 @@ class RewardMetrics:
             "precision": self.precision
         }
         self.metrics_name = metrics_name
-        self.metrics_func = metrics_all[metrics_name]
+        self.metrics_func = metrics_all["F1"]
     
     def postprocess_pred(self, prediction):
         res = [p for p in prediction.split("\n") if 'ans:' in p and 'none' not in p.lower()]

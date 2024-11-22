@@ -54,12 +54,18 @@ class RLRE(nn.Module):
             reward_batch["recall"] = torch.cat((reward_batch["recall"], torch.tensor([recall])))
         return reward_batch
     
-    def log_prob(self, p):
+    def log_prob_ordered_sampling(self, p):
         """
         Compute the expression:
         sum_{r=1}^K log(p_{i_r}) - sum_{r=1}^K log(1 - sum_{l=1}^{r-1} p_{i_l})
         """
         return torch.log(p + self.eps).sum(dim=0, keepdim=True) - torch.log(1. - torch.cumsum(p, dim=0)[:-1] + self.eps).sum(dim=0, keepdim=True)
+    
+    def log_prob_(self, p):
+        """
+        w.o. the order prior
+        """
+        return torch.log(p + self.eps).sum(dim=0, keepdim=True)
     
     def cal_loss_warmup(self, ):
         pass
@@ -79,8 +85,11 @@ class RLRE(nn.Module):
             loss = torch.cat((loss, torch.sum(P * (torch.log(P+self.eps)-torch.log(Q+self.eps)), dim=0, keepdim=True)))
         return loss.mean()
         
-    def cal_loss_reinforce(self, prob_batch, r_batch):
+    def cal_loss_reinforce(self, prob_batch, dropped_prob_batch, r_batch):
+        # version 2
         prob_batch = [self.log_prob(pr) for pr in prob_batch]
+        # version 1
+        # prob_batch = [self.log_prob_ordered_sampling(pr) if r>=0 else self.log_prob_(dpr) for pr, dpr, r in zip(prob_batch, dropped_prob_batch, r_batch)]
         prob_batch = torch.cat(prob_batch)
         r_batch = self.r_post_process(r_batch).to(self.ibtn.device)
         assert prob_batch.shape == r_batch.shape
