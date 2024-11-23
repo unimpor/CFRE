@@ -84,8 +84,9 @@ def train(num_epochs, patience, cfre, train_loader, val_loader, optimizer, log_d
             # save fg retriever
             save_checkpoint(cfre.ibtn, epoch, log_dir)
             best_epoch = epoch
-            # if epoch > 0:
-            #     cfre.baseline = cfre.baseline_cache  # update baseline to moving baseline
+            if best_val_signal > 0.67:
+                cfre.baseline = cfre.baseline_cache  # update baseline to moving baseline
+                write_log(f'Epoch {epoch} Update Baseline!', loggings)
         
         write_log(f'Epoch {epoch} Val Loss {val_loss} Best Val signal {best_val_signal} Best Epoch {best_epoch}', loggings)
 

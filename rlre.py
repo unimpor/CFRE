@@ -77,7 +77,7 @@ class RLRE(nn.Module):
     
     def r_post_process(self, a, alpha=0.005, beta=-0.15):
         # TODO: needs to modify
-        a = torch.where(a >= 0, a + alpha, a)
+        # a = torch.where(a >= 0, a + alpha, a)
         # a = torch.where(a < 0, -a, a)
         # constant-ratio
         # a = torch.where(a < 0, torch.zeros_like(a), a)
