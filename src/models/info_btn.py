@@ -18,9 +18,10 @@ class FineGrainedRetriever(nn.Module):
         self.strategy = algo_config["filtering"]  # strategy of filtering irrelevant info
         self.filter_num_or_ratio = algo_config["filtering_num_or_ratio"]
         self.training = True
-        self.add_gumbel = algo_config["gumbel"]
+        self.add_gumbel = algo_config["gumbel"]  # deprecated feature
         self.current_epoch = None
         self.constant_ratio = algo_config["constant_ratio"]
+        self.gumbel_strength = algo_config["gumbel_strength"]
         self.tau = float(algo_config["tau"])
         emb_size = config['hidden_size']
         model_type = config['model_type']
@@ -157,7 +158,6 @@ class FineGrainedRetriever(nn.Module):
         elif self.strategy == "topk":
             if not self.training:
                 # in val or test process.
-                print(self.get_r())
                 if self.filter_num_or_ratio is not None:
                     K = math.ceil(len(att_log_logit) * self.filter_num_or_ratio)
                 else: 
@@ -170,6 +170,6 @@ class FineGrainedRetriever(nn.Module):
             # TODO: Note the `dim`. Consider batch_size.
             else:
                 K = math.ceil(len(att_log_logit) * self.get_r())
-                return gumbel_topk(att_log_logit, K=K, tau=self.tau, mode="hard", dim=0, add_grumbel=self.add_gumbel)
+                return gumbel_topk(att_log_logit, K=K, tau=self.tau, mode="hard", dim=0, add_grumbel=self.add_gumbel, eta=self.gumbel_strength)
         else:
             raise NotImplementedError

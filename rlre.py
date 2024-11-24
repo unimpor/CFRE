@@ -19,7 +19,7 @@ class RLRE(nn.Module):
         self.reward_metrics = RewardMetrics(self.metrics_name)
         self.perturb_per_sample = config["perturb_per_sample"]  # Use 1. Not used in this method.
         self.regularize = config["regularize"]
-        self.baseline = torch.load("/home/comp/cscxliu/derek/CFRE/datasets/webqsp/processed/metrics.pth")
+        self.baseline = torch.load("/home/comp/cscxliu/derek/CFRE/datasets/webqsp/processed/metrics_prepare_0.3.pth")
         self.baseline_cache = {}
         self.set_moving_baseline = config["set_moving_baseline"]
         self.eps = 1e-5  # for numerical stability
@@ -81,7 +81,7 @@ class RLRE(nn.Module):
         # a = torch.where(a < 0, -a, a)
         # constant-ratio
         # a = torch.where(a < 0, torch.zeros_like(a), a)
-        a = torch.where((a >= beta) & (a < 0), torch.zeros_like(a), a)
+        # a = torch.where((a >= beta) & (a < 0), torch.zeros_like(a), a)
         return a
     
     def cal_loss_regularize(self, id_batch, logits_batch):
@@ -92,9 +92,10 @@ class RLRE(nn.Module):
             loss = torch.cat((loss, torch.sum(P * (torch.log(P+self.eps)-torch.log(Q+self.eps)), dim=0, keepdim=True)))
         return loss.mean()
         
-    def cal_loss_reinforce(self, prob_batch, dropped_prob_batch, r_batch):
+    def cal_loss_reinforce(self, prob_batch, irr_prob_batch, r_batch):
+        prob_batch = [self.log_prob_ordered_sampling(pr) if r>=0 else self.log_prob_ordered_sampling(ipr) for pr, ipr, r in zip(prob_batch, irr_prob_batch, r_batch)]
         # version 2 -- constant ratio
-        prob_batch = [self.log_prob_ordered_sampling(pr) for pr in prob_batch]
+        # prob_batch = [self.log_prob_ordered_sampling(pr) for pr in prob_batch]
         # version 1
         # prob_batch = [self.log_prob_ordered_sampling(pr) if r>=0 else self.log_prob_(dpr) for pr, dpr, r in zip(prob_batch, dropped_prob_batch, r_batch)]
         prob_batch = torch.cat(prob_batch)
@@ -112,22 +113,25 @@ class RLRE(nn.Module):
             graph_batch.to(self.ibtn.device), q_embd_batch.to(self.ibtn.device), relevant_idx_batch.to(self.ibtn.device)
         # Prob_batch is used to calculate loss
         # sorted_idx_batch is used to specify the selected triplet.
-        prob_batch, dropped_prob_batch, _, sorted_idx_batch, logits_batch = self.ibtn(graph_batch, triplet_batch_idx, q_embd_batch, epoch=epoch)
+        prob_batch, _, _, sorted_idx_batch, logits_batch = self.ibtn(graph_batch, triplet_batch_idx, q_embd_batch, epoch=epoch)
         masked_triplets_batch, _ = self.mask_triplet(triplet_batch, sorted_idx_batch)
+        # The construction of irr_prob_batch
+        # irr_prob_batch = [p[~torch.isin(s_idx, r_idx)] for r_idx, s_idx, p in zip(relevant_idx_batch, sorted_idx_batch, prob_batch)]
+        irr_prob_batch = [p[~torch.isin(s_idx, torch.arange(len(s_idx), device=self.ibtn.device))] for s_idx, p in zip(sorted_idx_batch, prob_batch)]
 
         # calculate rewards relative to the baseline.
         # TODO: LLMs calc rewards
         generation_batch = self.llms(question_batch, masked_triplets_batch)
         reward_batch = self.cal_rel_r(generation_batch, question_batch, answer_batch, id_batch, training=training)
         reward_loggings = {k:torch.mean(v).item() for k,v in reward_batch.items()}
-        loss = self.coeff1 * self.cal_loss_reinforce(prob_batch, dropped_prob_batch, reward_batch[self.metrics_name])
+        loss = self.coeff1 * self.cal_loss_reinforce(prob_batch, irr_prob_batch, reward_batch[self.metrics_name])
         reward_loggings["reinforce"] = loss.item()
-        if self.regularize and training:
+        if self.regularize == "KL" and training:
             # only training calculates regularization
             KL_reg_loss = self.coeff2 * self.cal_loss_regularize(id_batch, logits_batch)
             loss += KL_reg_loss
             reward_loggings["KL"] = KL_reg_loss.item()
-        if not self.regularize and training:
+        if self.regularize == "wp" and training:
             wp_loss = self.coeff2 * self.cal_loss_warmup(torch.concat(logits_batch, dim=0), relevant_idx_batch)
             loss += wp_loss
             reward_loggings["wp"] = wp_loss.item()

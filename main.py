@@ -84,7 +84,7 @@ def train(num_epochs, patience, cfre, train_loader, val_loader, optimizer, log_d
             # save fg retriever
             save_checkpoint(cfre.ibtn, epoch, log_dir)
             best_epoch = epoch
-            if best_val_signal > 0.67:
+            if best_val_signal > 0.7:
                 cfre.baseline = cfre.baseline_cache  # update baseline to moving baseline
                 write_log(f'Epoch {epoch} Update Baseline!', loggings)
         
@@ -102,7 +102,7 @@ def main():
     parser.add_argument('--device', type=int, default=0, help='cuda device id, -1 for cpu')
     parser.add_argument('--config_path', type=str, default="./config/config.yaml", help='path of config file')
     parser.add_argument('--proj_name', type=str, default="lora_w.o.gumbel")
-    parser.add_argument('--mode', type=str, default="inference")
+    parser.add_argument('--mode', type=str, default="train")
     parser.add_argument('--gnn', type=str, default="PNA")
     parser.add_argument('--coeff1', type=float, default=0.1)
     parser.add_argument('--coeff2', type=float, default=0.1)
@@ -169,14 +169,19 @@ def main():
         
     # Step 5. Training one epoch and batch
     # num_training_steps = args.num_epochs * len(train_loader)
-    if args.proj_name == "warmup":
-        train(warmup_config["num_epochs"], warmup_config["patience"], cfre, train_loader, val_loader, wp_optimizer, log_dir, warmup=True)
-    else:
-        train(train_config["num_epochs"], train_config["patience"], cfre, train_loader, val_loader, optimizer, log_dir, warmup=False)
-    # /home/comp/cscxliu/derek/CFRE/logging/webqsp/Llama-3.2-1B-Instruct/PNA/lora_gumbel
+    if args.mode == "inference":
+        ibtn.load_state_dict(torch.load(opj(log_dir, "best.pth"))["model"])
+        inference(ibtn, test_loader, log_dir)
 
-    ibtn.load_state_dict(torch.load(opj(log_dir, "best.pth"))["model"])
-    inference(ibtn, test_loader, log_dir)
+    else:
+        if args.proj_name == "warmup":
+            train(warmup_config["num_epochs"], warmup_config["patience"], cfre, train_loader, val_loader, wp_optimizer, log_dir, warmup=True)
+        else:
+            train(train_config["num_epochs"], train_config["patience"], cfre, train_loader, val_loader, optimizer, log_dir, warmup=False)
+        # /home/comp/cscxliu/derek/CFRE/logging/webqsp/Llama-3.2-1B-Instruct/PNA/lora_gumbel
+
+        ibtn.load_state_dict(torch.load(opj(log_dir, "best.pth"))["model"])
+        inference(ibtn, test_loader, log_dir)
     
 if __name__ == '__main__':
     main()

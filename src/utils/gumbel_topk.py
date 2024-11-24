@@ -4,18 +4,18 @@ from torch.overrides import has_torch_function_unary, handle_torch_function
 Tensor = torch.Tensor
 
 
-def gumbel_topk(logits: Tensor, K: int, tau: float = 2, mode: str = "st", eps: float = 1e-10, dim: int = -1, add_grumbel=True) -> Tensor:
+def gumbel_topk(logits: Tensor, K: int, tau: float = 2, mode: str = "st", eps: float = 1e-10, dim: int = -1, add_grumbel=True, eta=1.0) -> Tensor:
     """
     Adapted this function from torch.nn.functional.gumbel_softmax.
     See https://pytorch.org/docs/stable/generated/torch.nn.functional.gumbel_softmax.html#torch.nn.functional.gumbel_softmax
     """
     if has_torch_function_unary(logits):
-        return handle_torch_function(gumbel_topk, (logits,), logits, k=K, tau=tau, mode=mode, eps=eps, dim=dim)
+        return handle_torch_function(gumbel_topk, (logits,), logits, k=K, tau=tau, mode=mode, eps=eps, dim=dim, add_grumbel=add_grumbel, eta=eta)
 
     gumbels = (
         -torch.empty_like(logits, memory_format=torch.legacy_contiguous_format).exponential_().log()
     )  # ~Gumbel(0,1)
-    gumbels = (logits + gumbels) / tau if add_grumbel else logits / tau
+    gumbels = (logits + eta * gumbels) / tau if add_grumbel else logits / tau
     # ~Gumbel(logits,tau)
     y_soft, topk_indices = gumbels.softmax(dim), None
 
