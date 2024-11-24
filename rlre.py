@@ -76,12 +76,22 @@ class RLRE(nn.Module):
         return dir_loss
     
     def r_post_process(self, a, alpha=0.005, beta=-0.15):
-        # TODO: needs to modify
+        """
+        post process r. Let's see if this makes sense. Options:
+        1. add a small alpha when r is non-negative:
+             `a = torch.where(a >= 0, a + alpha, a)`;
+        2. set negative r to zero when it does not exceed a threshold beta:
+             `a = torch.where((a >= beta) & (a < 0), torch.zeros_like(a), a)`
+        3. Do not discourage, which proves not effective :(
+             `a = torch.where(a < 0, torch.zeros_like(a), a)`
+        """
+        # option 1
         # a = torch.where(a >= 0, a + alpha, a)
-        # a = torch.where(a < 0, -a, a)
-        # constant-ratio
-        # a = torch.where(a < 0, torch.zeros_like(a), a)
+        # option 2
         # a = torch.where((a >= beta) & (a < 0), torch.zeros_like(a), a)
+        # option 3
+        # a = torch.where(a < 0, torch.zeros_like(a), a)
+        
         return a
     
     def cal_loss_regularize(self, id_batch, logits_batch):
