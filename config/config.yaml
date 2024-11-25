@@ -32,7 +32,7 @@ train:
     wd: 0.
     num_epochs: 100
     patience: 10
-  lr_ret: 0.001
+  lr_ret: 1e-3
   wd_ret: 0.
   lr_llm: 1e-5  # deprecated
   wd_llm: 0.05  # deprecated
@@ -54,18 +54,21 @@ retriever:
 
 algorithm:
   filtering: topk # "topk" or "idp-bern"
-  filtering_num_or_ratio: 0.2 # int or float
+  filtering_num_or_ratio: null # int or float
   triplet2text: drop # "drop" or "mask"
   grad_normalize: True
   gumbel: True
   warmup: False # deprecated
   warmup_epochs: 15 # deprecated
-  coeff: 0.1
-  reward_metrics: F1
+  coeff1: 0.1
+  coeff2: 0.1
+  reward_metrics: "recall"
   perturb_per_sample: 1
-  regularize: "KL"
+  regularize: "wp"
   set_moving_baseline: False
   tau: 2.0
+  constant_ratio: 0.3
+  gumbel_strength: 1.0
 
 
 logging:
@@ -74,18 +77,3 @@ logging:
   llm: *llm
   ret: *gnn
 
-#    # Inference
-#    parser.add_argument("--eval_batch_size", type=int, default=16)
-#
-#    # LLM related
-#    parser.add_argument("--llm_num_virtual_tokens", type=int, default=10)
-#    parser.add_argument("--output_dir", type=str, default='output')
-#    parser.add_argument("--max_txt_len", type=int, default=512)
-#    parser.add_argument("--max_new_tokens", type=int, default=32)
-#    parser.add_argument("--max_memory", type=csv_list, default=[80,80])
-#
-#    # GNN related
-#    parser.add_argument("--gnn_in_dim", type=int, default=1024)
-#    parser.add_argument("--gnn_hidden_dim", type=int, default=1024)
-#    parser.add_argument("--gnn_num_heads", type=int, default=4)
-#    parser.add_argument("--gnn_dropout", type=float, default=0.0)

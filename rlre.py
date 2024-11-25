@@ -75,7 +75,7 @@ class RLRE(nn.Module):
         dir_loss = self.criterion(attn_logtis, target)
         return dir_loss
     
-    def r_post_process(self, a, alpha=0.005, beta=-0.15):
+    def r_post_process(self, a, alpha=0.001, beta=-0.15):
         """
         post process r. Let's see if this makes sense. Options:
         1. add a small alpha when r is non-negative:
@@ -86,7 +86,7 @@ class RLRE(nn.Module):
              `a = torch.where(a < 0, torch.zeros_like(a), a)`
         """
         # option 1
-        # a = torch.where(a >= 0, a + alpha, a)
+        a = torch.where(a >= 0, a + alpha, a)
         # option 2
         # a = torch.where((a >= beta) & (a < 0), torch.zeros_like(a), a)
         # option 3

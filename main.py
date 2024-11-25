@@ -84,7 +84,7 @@ def train(num_epochs, patience, cfre, train_loader, val_loader, optimizer, log_d
             # save fg retriever
             save_checkpoint(cfre.ibtn, epoch, log_dir)
             best_epoch = epoch
-            if best_val_signal > 0.7:
+            if best_val_signal > 0.705:
                 cfre.baseline = cfre.baseline_cache  # update baseline to moving baseline
                 write_log(f'Epoch {epoch} Update Baseline!', loggings)
         
@@ -107,6 +107,7 @@ def main():
     parser.add_argument('--coeff1', type=float, default=0.1)
     parser.add_argument('--coeff2', type=float, default=0.1)
     parser.add_argument('--tau', type=float, default=1)
+    parser.add_argument('--gumbel_strength', type=float, default=1)
     parser.add_argument('--llm_frozen_epoch', type=int, default=None)
     args = parser.parse_args()
     
@@ -114,6 +115,7 @@ def main():
     config['algorithm']['coeff1'] = args.coeff1
     config['algorithm']['coeff2'] = args.coeff2
     config['algorithm']['tau'] = args.tau
+    config['algorithm']['gumbel_strength'] = args.gumbel_strength
     train_config = config['train']
     llm_config = config['llms']
     warmup_config = train_config['warmup']
