@@ -61,13 +61,13 @@ class RLRE(nn.Module):
         Compute the expression:
         sum_{r=1}^K log(p_{i_r}) - sum_{r=1}^K log(1 - sum_{l=1}^{r-1} p_{i_l})
         """
-        return torch.log(p + self.eps).sum(dim=0, keepdim=True) - torch.log(1. - torch.cumsum(p, dim=0)[:-1] + self.eps).sum(dim=0, keepdim=True)
+        return (torch.log(p + self.eps).sum(dim=0, keepdim=True) - torch.log(1. - torch.cumsum(p, dim=0)[:-1] + self.eps).sum(dim=0, keepdim=True)) / float(p.shape[0])
     
     def log_prob_(self, p):
         """
         w.o. the order prior
         """
-        return torch.log(p + self.eps).sum(dim=0, keepdim=True)
+        return torch.log(p + self.eps).mean(dim=0, keepdim=True)
     
     def cal_loss_warmup(self, attn_logtis, relevant_idx):
         target = torch.zeros_like(attn_logtis)
@@ -103,7 +103,7 @@ class RLRE(nn.Module):
         return loss.mean()
         
     def cal_loss_reinforce(self, prob_batch, irr_prob_batch, r_batch):
-        prob_batch = [self.log_prob_ordered_sampling(pr) if r>=0 else self.log_prob_ordered_sampling(ipr) for pr, ipr, r in zip(prob_batch, irr_prob_batch, r_batch)]
+        prob_batch = [self.log_prob_(pr) if r>=0 else self.log_prob_(ipr) for pr, ipr, r in zip(prob_batch, irr_prob_batch, r_batch)]
         # version 2 -- constant ratio
         # prob_batch = [self.log_prob_ordered_sampling(pr) for pr in prob_batch]
         # version 1
@@ -127,6 +127,8 @@ class RLRE(nn.Module):
         masked_triplets_batch, _ = self.mask_triplet(triplet_batch, sorted_idx_batch)
         # The construction of irr_prob_batch
         # irr_prob_batch = [p[~torch.isin(s_idx, r_idx)] for r_idx, s_idx, p in zip(relevant_idx_batch, sorted_idx_batch, prob_batch)]
+        # update 11/25: add baseline selection
+        # baseline_selection = self.baseline.get(key, torch.arange(len(s_idx), device=device))
         irr_prob_batch = [p[~torch.isin(s_idx, torch.arange(len(s_idx), device=self.ibtn.device))] for s_idx, p in zip(sorted_idx_batch, prob_batch)]
 
         # calculate rewards relative to the baseline.
@@ -147,8 +149,10 @@ class RLRE(nn.Module):
             reward_loggings["wp"] = wp_loss.item()
         # print(loss, reward_loggings)
         if self.set_moving_baseline and training:
-            for d, attn in zip(id_batch, logits_batch):
+            for d, attn, idx in zip(id_batch, logits_batch, sorted_idx_batch):
                 self.baseline_cache[d]["logits"] = attn.detach().cpu().clone()
+                # update 11/25: add baseline selection
+                # self.baseline_cache[d]["baseline_selection"] = idx.detach().cpu().clone()
         return loss, reward_loggings
 
     def mask_triplet(self, triplets_batch, sorted_idx_batch):
