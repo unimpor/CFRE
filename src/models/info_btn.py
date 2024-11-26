@@ -23,6 +23,7 @@ class FineGrainedRetriever(nn.Module):
         self.constant_ratio = algo_config["constant_ratio"]
         self.gumbel_strength = algo_config["gumbel_strength"]
         self.tau = float(algo_config["tau"])
+        self.baseline_order_invariant = algo_config["baseline_order_invariant"]
         emb_size = config['hidden_size']
         model_type = config['model_type']
         # This is deprecated. We just use trivial non-text entity embedding.
@@ -119,14 +120,15 @@ class FineGrainedRetriever(nn.Module):
             for i in range(batch.num_graphs):
                 attn_logit = attn_logtis[triplet_batch_idx == i]
                 attn_prob = (attn_logit / self.tau).softmax(dim=0) 
-                attn, sorted_idx = self.sampling(attn_logit)  # get each sample's gumbel-perturbed attention and 1's index
-                dropped_idx = torch.nonzero(attn==0).squeeze()
-                
+                _, sorted_idx = self.sampling(attn_logit)  # get each sample's gumbel-perturbed attention and 1's index
+                # dropped_idx = torch.nonzero(attn==0).squeeze()
+                if self.baseline_order_invariant:
+                    pass
                 logits_batch.append(attn_logit)
-                mask_batch.append(attn)
+                # mask_batch.append(attn)
                 sorted_idx_batch.append(sorted_idx)
                 prob_batch.append(attn_prob[sorted_idx])
-                dropped_prob_batch.append(attn_prob[dropped_idx])
+                # dropped_prob_batch.append(attn_prob[dropped_idx])
             # attns = torch.concat(attns)
         else:
             raise NotImplementedError
