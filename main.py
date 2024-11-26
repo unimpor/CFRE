@@ -48,7 +48,7 @@ def train(num_epochs, patience, cfre, train_loader, val_loader, optimizer, log_d
         cfre.baseline_cache = {}  # set empty to baseline cache at the start of every epoch.
         epoch_loss, accum_loss, val_loss = 0., 0., 0.
         all_loss_dict, all_loss_dict_val = {}, {}
-        for step, batch in enumerate(train_loader):
+        for _, batch in enumerate(train_loader):
             optimizer.zero_grad()
             # loss, loss_dict = cfre.forward_pass(batch, epoch)
             loss, loss_dict = cfre.forward_pass(batch, epoch, warmup=warmup, training=True)
@@ -68,12 +68,12 @@ def train(num_epochs, patience, cfre, train_loader, val_loader, optimizer, log_d
         cfre.ibtn.set_eval()
         with torch.no_grad():
             for _, batch in enumerate(val_loader):
-                loss, loss_dict = cfre.forward_pass(batch, epoch, warmup=warmup, training=False)
-                val_loss += loss.item()
+                _, loss_dict = cfre.forward_pass(batch, epoch, warmup=warmup, training=False)
+                # val_loss += loss.item()
                 for k, v in loss_dict.items():
                     all_loss_dict_val[k] = all_loss_dict_val.get(k, 0) + v
             
-            val_loss = val_loss / len(val_loader)
+            # val_loss = val_loss / len(val_loader)
             for k, v in all_loss_dict_val.items():
                 all_loss_dict_val[k] = v / len(val_loader)
             write_log(f"Epoch: {epoch}|{num_epochs}. Val Loss: {val_loss}" + str(all_loss_dict_val), loggings)
@@ -84,6 +84,8 @@ def train(num_epochs, patience, cfre, train_loader, val_loader, optimizer, log_d
             # save fg retriever
             save_checkpoint(cfre.ibtn, epoch, log_dir)
             best_epoch = epoch
+            update_num = cfre.update_baseline(train_loader)
+            write_log(f"Epoch: {epoch}|{num_epochs}. Update {update_num} training samples to better.", loggings)
             # if best_val_signal > 0.705:
             #     cfre.baseline = cfre.baseline_cache  # update baseline to moving baseline
             #     write_log(f'Epoch {epoch} Update Baseline!', loggings)

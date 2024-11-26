@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from src.utils import PLACEHOLDER, RewardMetrics
+from statistics import mean
+import copy
 
 
 class RLRE(nn.Module):
@@ -46,8 +48,8 @@ class RLRE(nn.Module):
         for g,q,a,d in zip(g_batch, q_batch, a_batch, id_batch):
             f1, prec, recall = self.reward_metrics.calc_r(g,a,q)
             # only the training needs relative to baselines.
-            if self.set_moving_baseline and training:
-                self.baseline_cache[d] = {'F1': f1, 'precision': prec, 'recall': recall}
+            # if self.set_moving_baseline and training:
+            #     self.baseline_cache[d] = {'F1': f1, 'precision': prec, 'recall': recall}
             if training:
                 baseline = self.baseline[d]
                 f1, prec, recall = f1-baseline["F1"], prec-baseline["precision"], recall-baseline["recall"]
@@ -128,33 +130,43 @@ class RLRE(nn.Module):
         # The construction of irr_prob_batch
         # irr_prob_batch = [p[~torch.isin(s_idx, r_idx)] for r_idx, s_idx, p in zip(relevant_idx_batch, sorted_idx_batch, prob_batch)]
         # update 11/25: add baseline selection
-        # baseline_selection = self.baseline.get(key, torch.arange(len(s_idx), device=device))
-        irr_prob_batch = [p[~torch.isin(s_idx, torch.arange(len(s_idx), device=self.ibtn.device))] for s_idx, p in zip(sorted_idx_batch, prob_batch)]
-
         # calculate rewards relative to the baseline.
         # TODO: LLMs calc rewards
         generation_batch = self.llms(question_batch, masked_triplets_batch)
         reward_batch = self.cal_rel_r(generation_batch, question_batch, answer_batch, id_batch, training=training)
         reward_loggings = {k:torch.mean(v).item() for k,v in reward_batch.items()}
+        
+        if not self.training:
+            return 0, reward_loggings
+
+        baseline_selection_batch = [self.baseline[k].get("baseline_selection", torch.arange(len(s_idx))).to(self.ibtn.device) for s_idx, k in zip(sorted_idx_batch, id_batch)]
+        irr_prob_batch = [p[~torch.isin(s_idx, baseline_selection)] for s_idx, p, baseline_selection in zip(sorted_idx_batch, prob_batch, baseline_selection_batch)]
+
         loss = self.coeff1 * self.cal_loss_reinforce(prob_batch, irr_prob_batch, reward_batch[self.metrics_name])
         reward_loggings["reinforce"] = loss.item()
-        if self.regularize == "KL" and training:
+        if self.regularize == "KL":
             # only training calculates regularization
             KL_reg_loss = self.coeff2 * self.cal_loss_regularize(id_batch, logits_batch)
             loss += KL_reg_loss
             reward_loggings["KL"] = KL_reg_loss.item()
-        if self.regularize == "wp" and training:
+        if self.regularize == "wp":
             wp_loss = self.coeff2 * self.cal_loss_warmup(torch.concat(logits_batch, dim=0), relevant_idx_batch)
             loss += wp_loss
             reward_loggings["wp"] = wp_loss.item()
         # print(loss, reward_loggings)
-        if self.set_moving_baseline and training:
-            for d, attn, idx in zip(id_batch, logits_batch, sorted_idx_batch):
-                self.baseline_cache[d]["logits"] = attn.detach().cpu().clone()
+        if self.set_moving_baseline:
+            for d, logits, s_idx in zip(id_batch, logits_batch, sorted_idx_batch):
+                # self.baseline_cache[d]["logits"] = logits.detach().cpu().clone()
                 # update 11/25: add baseline selection
-                # self.baseline_cache[d]["baseline_selection"] = idx.detach().cpu().clone()
-        return loss, reward_loggings
+                _, topk_indices = logits.topk(s_idx.shape[0], dim=0, largest=True, sorted=True)
+                # self.baseline_cache[d]["baseline_selection"] = topk_indices.detach().cpu().clone()
 
+                self.baseline_cache[d] = {
+                    "logits": logits.detach().cpu().clone(),
+                    "baseline_selection": topk_indices.detach().cpu().clone()
+                }
+        return loss, reward_loggings
+    
     def mask_triplet(self, triplets_batch, sorted_idx_batch):
         """
         `strategy` can be set as "drop" or "mask", "drop" as default.
@@ -178,6 +190,45 @@ class RLRE(nn.Module):
             # masked_token_ids = attns * triplets_token_ids
         return masked_triplets_batch, masked_attns_batch
         # return masked_token_ids
+
+    def update_baseline(self, loader):
+        if not self.set_moving_baseline:
+            print("Not Update.")
+            return False
+        
+        with torch.no_grad():
+            for _, batch in enumerate(loader):
+                graph_batch, answer_batch, triplet_batch, triplet_batch_idx, relevant_idx_batch, question_batch, q_embd_batch, id_batch = \
+                    batch["graph"], batch["y"], batch["triplets"], batch['triplet_batch_idx'], batch["relevant_idx"], batch["q"], batch["q_embd"], batch["id"]
+                
+                sorted_idx_batch = [self.baseline_cache[d]["baseline_selection"] for d in id_batch]
+                masked_triplets_batch, _ = self.mask_triplet(triplet_batch, sorted_idx_batch)
+                generation_batch = self.llms(question_batch, masked_triplets_batch)
+
+                for g,q,a,d in zip(generation_batch, question_batch, answer_batch, id_batch):
+                    f1, prec, recall = self.reward_metrics.calc_r(g,a,q)
+                    self.baseline_cache[d]["F1"] = f1
+                    self.baseline_cache[d]["precision"] = prec
+                    self.baseline_cache[d]["recall"] = recall
+        # get average of baseline and baseline cache to determine if we update
+        assert len(self.baseline) == len(self.baseline_cache)
+        # print(len(self.baseline), len(self.baseline_cache))
+        # baseline_metrics = mean(member[self.metrics_name] for member in self.baseline.values())
+        # baseline_cache_metrics = mean(member[self.metrics_name] for member in self.baseline_cache.values())
+        update_num = 0
+        # self.baseline = {k: self.baseline[k] for k in self.baseline_cache.keys()}
+        for k, v in self.baseline.items():
+            if v[self.metrics_name] < self.baseline_cache[k][self.metrics_name]:
+                update_num += 1
+                self.baseline[k] = copy.deepcopy(self.baseline_cache[k])
+        return update_num
+        # if baseline_cache_metrics > baseline_metrics:
+        #     self.baseline = copy.deepcopy(self.baseline_cache)
+        #     print(f"{baseline_cache_metrics} larger than {baseline_metrics}. Update.")
+        #     return True
+        # print(f"{baseline_cache_metrics} smaller than {baseline_metrics}. Not Update.")
+        # return False
+
 
     @property
     def trainable_params(self):
