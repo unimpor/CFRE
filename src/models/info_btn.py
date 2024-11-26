@@ -68,7 +68,7 @@ class FineGrainedRetriever(nn.Module):
     def set_train(self):
         self.training = True
     
-    def forward(self, batch, triplet_batch_idx, batch_q_embds, epoch):
+    def forward(self, batch, triplet_batch_idx, batch_q_embds, epoch, **kwargs):
         # TODO: Currently deprecate two Functions, `non_text_entity_embd` and `topic_entity_onehot`
         # if self.non_text_entity_emb is None:
         #     h_e = torch.cat([
@@ -81,6 +81,8 @@ class FineGrainedRetriever(nn.Module):
         #         self.non_text_entity_emb(torch.LongTensor([0]).to(device)).expand(
         #             num_non_text_entities, -1)
         #     ], dim=0)
+        id_batch = kwargs.get("id_batch", None)
+        baseline = kwargs.get("baseline", None)
         self.current_epoch = epoch
         h_id_tensor, t_id_tensor = batch.edge_index
         # h_id_tensor, t_id_tensor = edge_index
@@ -122,8 +124,10 @@ class FineGrainedRetriever(nn.Module):
                 attn_prob = (attn_logit / self.tau).softmax(dim=0) 
                 _, sorted_idx = self.sampling(attn_logit)  # get each sample's gumbel-perturbed attention and 1's index
                 # dropped_idx = torch.nonzero(attn==0).squeeze()
-                if self.baseline_order_invariant:
-                    pass
+                if self.baseline_order_invariant and self.training:
+                    print("baseline_order_invariant")
+                    baseline_selection = baseline[id_batch[i]].get("baseline_selection", torch.arange(len(sorted_idx)))
+                    sorted_idx = self.keep_order(baseline_selection.detach().cpu(), sorted_idx.detach().cpu()).to(self.ibtn.device)
                 logits_batch.append(attn_logit)
                 # mask_batch.append(attn)
                 sorted_idx_batch.append(sorted_idx)
@@ -143,6 +147,25 @@ class FineGrainedRetriever(nn.Module):
             r = final_r
         return r
     
+    @staticmethod
+    def keep_order(self, a, b):
+        overlap = [x for x in b.tolist() if x in a.tolist()]
+        if not overlap:
+            return b
+        ordered_overlap = sorted(overlap, key=lambda x: a.tolist().index(x))
+
+        adjusted_b = []
+        overlap_index = 0
+
+        for element in b.tolist():
+            if element in a.tolist():
+                adjusted_b.append(ordered_overlap[overlap_index])
+                overlap_index += 1
+            else:
+                adjusted_b.append(element)
+
+        return torch.tensor(adjusted_b)
+
     def sampling(self, att_log_logit, temp=1):
         """
         strategy = "idp-bern" or "topk"

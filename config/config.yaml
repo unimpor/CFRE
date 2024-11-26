@@ -65,7 +65,7 @@ algorithm:
   reward_metrics: "recall"
   perturb_per_sample: 1
   regularize: "wp"
-  set_moving_baseline: False
+  set_moving_baseline: True
   tau: 2.0
   constant_ratio: 0.3
   gumbel_strength: 1.0
