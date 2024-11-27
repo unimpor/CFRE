@@ -56,7 +56,11 @@ class LLMs(nn.Module):
         return conversation                
 
     def forward(self, query_batch, triplet_batch):
-        conversation_batch = [self.generate_prompt(q,t) for q, t in zip(query_batch, triplet_batch)]
-        outputs = self.llm(messages=conversation_batch)
-        generations = [output.outputs[0].text for output in outputs]
+        # batch generation
+        # conversation_batch = [self.generate_prompt(q,t) for q, t in zip(query_batch, triplet_batch)]
+        # outputs = self.llm(messages=conversation_batch)
+        # generations = [output.outputs[0].text for output in outputs]
+
+        outputs = [self.llm(messages=self.generate_prompt(q,t)) for q, t in zip(query_batch, triplet_batch)]
+        generations = [output[0].outputs[0].text for output in outputs]
         return generations

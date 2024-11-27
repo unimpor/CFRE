@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from src.utils import PLACEHOLDER, RewardMetrics
 from statistics import mean
 import copy
-
+import mathcd 
 
 class RLRE(nn.Module):
     """
@@ -21,7 +21,7 @@ class RLRE(nn.Module):
         self.reward_metrics = RewardMetrics(self.metrics_name)
         self.perturb_per_sample = config["perturb_per_sample"]  # Use 1. Not used in this method.
         self.regularize = config["regularize"]
-        self.baseline = torch.load("/home/comp/cscxliu/derek/CFRE/datasets/webqsp/processed/metrics_prepare_0.3.pth")
+        self.baseline = torch.load("/home/comp/cscxliu/derek/CFRE/logging/webqsp/Meta-Llama-3.1-8B-Instruct/PNA/reinforce_112724/baseline_org.pth")
         self.baseline_cache = {}
         self.set_moving_baseline = config["set_moving_baseline"]
         self.eps = 1e-5  # for numerical stability
@@ -124,6 +124,20 @@ class RLRE(nn.Module):
         # 2. generate mask for the coarsely retrieved samples.
         graph_batch, answer_batch, triplet_batch, triplet_batch_idx, relevant_idx_batch, question_batch, q_embd_batch, id_batch = \
             batch["graph"], batch["y"], batch["triplets"], batch['triplet_batch_idx'], batch["relevant_idx"], batch["q"], batch["q_embd"], batch["id"]
+        # if epoch == 0 and training:
+        #     # Prepare baseline. Will commented later.
+        #     sorted_idx_batch = [torch.arange(math.ceil(len(t) * 0.3)) for t in triplet_batch]
+        #     masked_triplets_batch, _ = self.mask_triplet(triplet_batch, sorted_idx_batch)
+        #     generation_batch = self.llms(question_batch, masked_triplets_batch)
+        #     for g,q,a,d,s in zip(generation_batch, question_batch, answer_batch, id_batch, sorted_idx_batch):
+        #         f1, prec, recall = self.reward_metrics.calc_r(g,a,q)
+        #         self.baseline[d] = {
+        #             "F1": f1,
+        #             "precision": prec,
+        #             "recall": recall,
+        #             "baseline_selection": s
+        #         }
+
         # batch_size = graph_batch.num_graphs
         graph_batch, q_embd_batch, relevant_idx_batch = \
             graph_batch.to(self.ibtn.device), q_embd_batch.to(self.ibtn.device), relevant_idx_batch.to(self.ibtn.device)
@@ -167,7 +181,7 @@ class RLRE(nn.Module):
                 # self.baseline_cache[d]["baseline_selection"] = topk_indices.detach().cpu().clone()
 
                 self.baseline_cache[d] = {
-                    "logits": logits.detach().cpu().clone(),
+                    # "logits": logits.detach().cpu().clone(),
                     "baseline_selection": topk_indices.detach().cpu().clone()
                 }
         return loss, reward_loggings
@@ -216,6 +230,7 @@ class RLRE(nn.Module):
                     self.baseline_cache[d]["precision"] = prec
                     self.baseline_cache[d]["recall"] = recall
         # get average of baseline and baseline cache to determine if we update
+        # print(len(self.baseline), len(self.baseline_cache))
         assert len(self.baseline) == len(self.baseline_cache)
         # print(len(self.baseline), len(self.baseline_cache))
         # baseline_metrics = mean(member[self.metrics_name] for member in self.baseline.values())

@@ -125,9 +125,8 @@ class FineGrainedRetriever(nn.Module):
                 _, sorted_idx = self.sampling(attn_logit)  # get each sample's gumbel-perturbed attention and 1's index
                 # dropped_idx = torch.nonzero(attn==0).squeeze()
                 if self.baseline_order_invariant and self.training:
-                    print("baseline_order_invariant")
                     baseline_selection = baseline[id_batch[i]].get("baseline_selection", torch.arange(len(sorted_idx)))
-                    sorted_idx = self.keep_order(baseline_selection.detach().cpu(), sorted_idx.detach().cpu()).to(self.ibtn.device)
+                    sorted_idx = self.keep_order(baseline_selection.detach().cpu(), sorted_idx.detach().cpu()).to(self.device)
                 logits_batch.append(attn_logit)
                 # mask_batch.append(attn)
                 sorted_idx_batch.append(sorted_idx)

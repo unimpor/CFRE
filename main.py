@@ -78,13 +78,18 @@ def train(num_epochs, patience, cfre, train_loader, val_loader, optimizer, log_d
                 all_loss_dict_val[k] = v / len(val_loader)
             write_log(f"Epoch: {epoch}|{num_epochs}. Val Loss: {val_loss}" + str(all_loss_dict_val), loggings)
             # wandb.log({'Val Loss': val_loss})
-
+        # if epoch == 0:
+        #     torch.save(cfre.baseline, opj(log_dir, "baseline_org.pth"))
+        
         if all_loss_dict_val[cfre.metrics_name] > best_val_signal:
             best_val_signal = all_loss_dict_val[cfre.metrics_name]
             # save fg retriever
             save_checkpoint(cfre.ibtn, epoch, log_dir)
             best_epoch = epoch
+        
+        if (epoch + 1) % 4 == 0:
             update_num = cfre.update_baseline(train_loader)
+            torch.save(cfre.baseline, opj(log_dir, "baseline.pth"))
             write_log(f"Epoch: {epoch}|{num_epochs}. Update {update_num} training samples to better.", loggings)
             # if best_val_signal > 0.705:
             #     cfre.baseline = cfre.baseline_cache  # update baseline to moving baseline
