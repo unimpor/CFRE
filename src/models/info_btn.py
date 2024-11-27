@@ -148,7 +148,7 @@ class FineGrainedRetriever(nn.Module):
         return r
     
     @staticmethod
-    def keep_order(self, a, b):
+    def keep_order(a, b):
         overlap = [x for x in b.tolist() if x in a.tolist()]
         if not overlap:
             return b

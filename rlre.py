@@ -63,12 +63,16 @@ class RLRE(nn.Module):
         Compute the expression:
         sum_{r=1}^K log(p_{i_r}) - sum_{r=1}^K log(1 - sum_{l=1}^{r-1} p_{i_l})
         """
+        if p.numel() == 0:
+            return torch.tensor(0.0, device=p.device)
         return (torch.log(p + self.eps).sum(dim=0, keepdim=True) - torch.log(1. - torch.cumsum(p, dim=0)[:-1] + self.eps).sum(dim=0, keepdim=True)) / float(p.shape[0])
     
     def log_prob_(self, p):
         """
         w.o. the order prior
         """
+        if p.numel() == 0:
+            return torch.tensor(0.0, device=p.device)
         return torch.log(p + self.eps).mean(dim=0, keepdim=True)
     
     def cal_loss_warmup(self, attn_logtis, relevant_idx):
@@ -105,7 +109,7 @@ class RLRE(nn.Module):
         return loss.mean()
         
     def cal_loss_reinforce(self, prob_batch, irr_prob_batch, r_batch):
-        prob_batch = [self.log_prob_(pr) if r>=0 else self.log_prob_(ipr) for pr, ipr, r in zip(prob_batch, irr_prob_batch, r_batch)]
+        prob_batch = [self.log_prob_ordered_sampling(pr) if r>=0 else self.log_prob_ordered_sampling(ipr) for pr, ipr, r in zip(prob_batch, irr_prob_batch, r_batch)]
         # version 2 -- constant ratio
         # prob_batch = [self.log_prob_ordered_sampling(pr) for pr in prob_batch]
         # version 1
@@ -116,7 +120,7 @@ class RLRE(nn.Module):
         rl_loss = - (r_batch * prob_batch).mean()
         return rl_loss
     
-    def forward_pass(self, batch, epoch=None, warmup=False, training=True):
+    def forward_pass(self, batch, epoch=None, warmup=False, training=True): 
         # 2. generate mask for the coarsely retrieved samples.
         graph_batch, answer_batch, triplet_batch, triplet_batch_idx, relevant_idx_batch, question_batch, q_embd_batch, id_batch = \
             batch["graph"], batch["y"], batch["triplets"], batch['triplet_batch_idx'], batch["relevant_idx"], batch["q"], batch["q_embd"], batch["id"]
@@ -125,7 +129,8 @@ class RLRE(nn.Module):
             graph_batch.to(self.ibtn.device), q_embd_batch.to(self.ibtn.device), relevant_idx_batch.to(self.ibtn.device)
         # Prob_batch is used to calculate loss
         # sorted_idx_batch is used to specify the selected triplet.
-        prob_batch, _, _, sorted_idx_batch, logits_batch = self.ibtn(graph_batch, triplet_batch_idx, q_embd_batch, epoch=epoch)
+        prob_batch, _, _, sorted_idx_batch, logits_batch = self.ibtn(graph_batch, triplet_batch_idx, q_embd_batch, epoch=epoch) if not training \
+            else self.ibtn(graph_batch, triplet_batch_idx, q_embd_batch, epoch, id_batch=id_batch, baseline=self.baseline)
         masked_triplets_batch, _ = self.mask_triplet(triplet_batch, sorted_idx_batch)
         # The construction of irr_prob_batch
         # irr_prob_batch = [p[~torch.isin(s_idx, r_idx)] for r_idx, s_idx, p in zip(relevant_idx_batch, sorted_idx_batch, prob_batch)]
