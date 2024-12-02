@@ -87,10 +87,12 @@ def train(num_epochs, patience, cfre, train_loader, val_loader, optimizer, log_d
             save_checkpoint(cfre.ibtn, epoch, log_dir)
             best_epoch = epoch
         
-        if (epoch + 1) % 4 == 0:
-            update_num = cfre.update_baseline(train_loader)
-            torch.save(cfre.baseline, opj(log_dir, "baseline.pth"))
-            write_log(f"Epoch: {epoch}|{num_epochs}. Update {update_num} training samples to better.", loggings)
+        # reference update. Deprecated right now.
+        # if (epoch + 1) % 4 == 0:
+        #     update_num = cfre.update_baseline(train_loader)
+        #     torch.save(cfre.baseline, opj(log_dir, "baseline.pth"))
+        #     write_log(f"Epoch: {epoch}|{num_epochs}. Update {update_num} training samples to better.", loggings)
+
             # if best_val_signal > 0.705:
             #     cfre.baseline = cfre.baseline_cache  # update baseline to moving baseline
             #     write_log(f'Epoch {epoch} Update Baseline!', loggings)
@@ -162,7 +164,7 @@ def main():
 
     ibtn = FineGrainedRetriever(config['retriever']['gnn'], algo_config).to(device)
     if args.proj_name != "warmup":
-        wp_retriever = torch.load("./logging/webqsp/Llama-3.2-1B-Instruct/PNA/warmup/best.pth", map_location=device)["model"]
+        wp_retriever = torch.load("datasets/webqsp/checkpoints/warmup.pth", map_location=device)["model"]
         ibtn.load_state_dict(wp_retriever)
     # if args.mode == "inference" and os.path.exists(opj(log_dir, "best.pth")):
     #     print("Load Inference model..")
