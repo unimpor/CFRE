@@ -24,6 +24,7 @@ class FineGrainedRetriever(nn.Module):
         self.gumbel_strength = algo_config["gumbel_strength"]
         self.tau = float(algo_config["tau"])
         self.baseline_order_invariant = algo_config["baseline_order_invariant"]
+        self.noise_generator = torch.Generator()
         emb_size = config['hidden_size']
         model_type = config['model_type']
         # This is deprecated. We just use trivial non-text entity embedding.
@@ -122,7 +123,8 @@ class FineGrainedRetriever(nn.Module):
             for i in range(batch.num_graphs):
                 attn_logit = attn_logtis[triplet_batch_idx == i]
                 attn_prob = (attn_logit / self.tau).softmax(dim=0) 
-                _, sorted_idx = self.sampling(attn_logit)  # get each sample's gumbel-perturbed attention and 1's index
+                # TODO: assign `seed` variable.
+                _, sorted_idx = self.sampling(attn_logit, seed=10*epoch)  # get each sample's gumbel-perturbed attention and 1's index
                 # dropped_idx = torch.nonzero(attn==0).squeeze()
                 if self.baseline_order_invariant and self.training:
                     baseline_selection = baseline[id_batch[i]].get("baseline_selection", torch.arange(len(sorted_idx)))
@@ -165,7 +167,7 @@ class FineGrainedRetriever(nn.Module):
 
         return torch.tensor(adjusted_b)
 
-    def sampling(self, att_log_logit, temp=1):
+    def sampling(self, att_log_logit, seed=None, temp=1):
         """
         strategy = "idp-bern" or "topk"
         K only applies when `strategy` set to "topk"
@@ -194,6 +196,6 @@ class FineGrainedRetriever(nn.Module):
             # TODO: Note the `dim`. Consider batch_size.
             else:
                 K = math.ceil(len(att_log_logit) * self.get_r())
-                return gumbel_topk(att_log_logit, K=K, tau=self.tau, mode="hard", dim=0, add_grumbel=self.add_gumbel, eta=self.gumbel_strength)
+                return gumbel_topk(att_log_logit, K=K, tau=self.tau, mode="hard", dim=0, add_grumbel=self.add_gumbel, eta=self.gumbel_strength, g=self.noise_generator, seed=seed)
         else:
             raise NotImplementedError
