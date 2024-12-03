@@ -2,7 +2,7 @@ dataset:
   name: &dataset 'webqsp'
   root: ./datasets
   emb_name: 'gte-large-en-v1.5'
-  coarse_filter: True
+  coarse_filter: False
   coarse_num_or_ratio: 300
   skip_no_path: True
 
@@ -54,21 +54,22 @@ retriever:
 
 algorithm:
   filtering: topk # "topk" or "idp-bern"
-  filtering_num_or_ratio: null # int or float
+  filtering_num_or_ratio: 100 # int or float
   triplet2text: drop # "drop" or "mask"
-  grad_normalize: True
-  gumbel: True
-  warmup: False # deprecated
-  warmup_epochs: 15 # deprecated
+  # grad_normalize: True  # deprecated
+  # gumbel: True # deprecated
+  # warmup: False # deprecated
+  # warmup_epochs: 15 # deprecated
   coeff1: 0.1
   coeff2: 0.1
   reward_metrics: "recall"
   perturb_per_sample: 1
   regularize: "wp"
-  set_moving_baseline: True
+  set_moving_baseline: False
   tau: 2.0
-  constant_ratio: 0.3
+  # constant_ratio: 0.3 # deprecated
   gumbel_strength: 1.0
+  baseline_order_invariant: True
 
 
 logging:

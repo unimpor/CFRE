@@ -1,10 +1,10 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from src.utils import PLACEHOLDER, RewardMetrics
-from statistics import mean
+from src.utils import PLACEHOLDER, RewardMetrics, gumbel_topk
 import copy
-import mathcd 
+import math
+
 
 class RLRE(nn.Module):
     """
@@ -12,7 +12,7 @@ class RLRE(nn.Module):
     """
     def __init__(self, fg_retriever, llm_model, config, **kwargs):
         super().__init__()
-        self.ibtn = fg_retriever
+        self.retriever = fg_retriever
         self.llms = llm_model
         self.coeff1 = float(config['coeff1'])  # trade-off coeff between RL and regularization
         self.coeff2 = float(config['coeff2'])
@@ -21,14 +21,22 @@ class RLRE(nn.Module):
         self.reward_metrics = RewardMetrics(self.metrics_name)
         self.perturb_per_sample = config["perturb_per_sample"]  # Use 1. Not used in this method.
         self.regularize = config["regularize"]
-        self.baseline = torch.load("/home/comp/cscxliu/derek/CFRE/logging/webqsp/Meta-Llama-3.1-8B-Instruct/PNA/reinforce_112724/baseline_org.pth")
+        self.baseline = torch.load("/home/comp/cscxliu/derek/CFRE/datasets/webqsp/checkpoints/reference.pth")
         self.baseline_cache = {}
         self.set_moving_baseline = config["set_moving_baseline"]
         self.eps = 1e-5  # for numerical stability
         self.tau = float(config["tau"])  # for building distribution
         self.criterion = nn.BCEWithLogitsLoss(reduction="mean")
-        # TODO: We may also consider perturb_per_sample > 1
+        self.strategy = config["filtering"]
+        self.filter_num_or_ratio = config["filtering_num_or_ratio"]
+        self.gumbel_strength = config["gumbel_strength"]
+        self.tau = float(config["tau"])
+        self.baseline_order_invariant = config["baseline_order_invariant"]
+        self.noise_generator = torch.Generator()
+        
         # deprecated.
+        # self.add_gumbel = config["gumbel"]
+        # self.constant_ratio = config["constant_ratio"]
         # self.warmup_epochs = config['warmup_epochs']
         # self.criterion = nn.BCEWithLogitsLoss(reduction="mean")
         # self.strategy = config['triplet2text']
@@ -36,7 +44,7 @@ class RLRE(nn.Module):
     def device(self):
         return list(self.parameters())[0].device
 
-    def cal_rel_r(self, g_batch, q_batch, a_batch, id_batch, training):
+    def cal_reward(self, g_batch, q_batch, a_batch, id_batch, training):
         """
         Given query and retrieved triplets, return the reward rerlative to the ``baseline''.
         """
@@ -65,7 +73,7 @@ class RLRE(nn.Module):
         """
         if p.numel() == 0:
             return torch.tensor(0.0, device=p.device)
-        return (torch.log(p + self.eps).sum(dim=0, keepdim=True) - torch.log(1. - torch.cumsum(p, dim=0)[:-1] + self.eps).sum(dim=0, keepdim=True)) / float(p.shape[0])
+        return torch.log(p + self.eps).mean(dim=0, keepdim=True) - torch.log(1. - torch.cumsum(p, dim=0)[:-1] + self.eps).mean(dim=0, keepdim=True)
     
     def log_prob_(self, p):
         """
@@ -75,14 +83,12 @@ class RLRE(nn.Module):
             return torch.tensor(0.0, device=p.device)
         return torch.log(p + self.eps).mean(dim=0, keepdim=True)
     
-    def cal_loss_warmup(self, attn_logtis, relevant_idx):
-        target = torch.zeros_like(attn_logtis)
-        target[relevant_idx] = 1.
-        dir_loss = self.criterion(attn_logtis, target)
-        return dir_loss
-    
+    def log_prob_weighted(self, p):
+        pass
+
     def r_post_process(self, a, alpha=0.001, beta=-0.15):
         """
+        Update 3rd Dec: Deprecated Feature.
         post process r. Let's see if this makes sense. Options:
         1. add a small alpha when r is non-negative:
              `a = torch.where(a >= 0, a + alpha, a)`;
@@ -92,44 +98,50 @@ class RLRE(nn.Module):
              `a = torch.where(a < 0, torch.zeros_like(a), a)`
         """
         # option 1
-        a = torch.where(a >= 0, a + alpha, a)
+        # a = torch.where(a >= 0, a + alpha, a)
         # option 2
         # a = torch.where((a >= beta) & (a < 0), torch.zeros_like(a), a)
         # option 3
         # a = torch.where(a < 0, torch.zeros_like(a), a)
         
-        return a
+        return torch.sign(a)
     
-    def cal_loss_regularize(self, id_batch, logits_batch):
-        loss = torch.empty(0, dtype=torch.float, device=self.ibtn.device)
-        for sample_id, attn in zip(id_batch, logits_batch):
-            P = (attn / self.tau).softmax(dim=0)
-            Q = (self.baseline[sample_id]["logits"] / self.tau).softmax(dim=0).to(self.ibtn.device)
+    def cal_loss_warmup(self, attn_logtis, relevant_idx):
+        target = torch.zeros_like(attn_logtis)
+        target[relevant_idx] = 1.
+        dir_loss = self.criterion(attn_logtis, target)
+        return dir_loss
+    
+    def cal_loss_regularize(self, id_batch, prob_batch):
+        loss = torch.empty(0, dtype=torch.float, device=self.retriever.device)
+        for sample_id, P in zip(id_batch, prob_batch):
+            Q = (self.baseline[sample_id]["logits"] / self.tau).softmax(dim=0).to(self.retriever.device)
             loss = torch.cat((loss, torch.sum(P * (torch.log(P+self.eps)-torch.log(Q+self.eps)), dim=0, keepdim=True)))
         return loss.mean()
         
-    def cal_loss_reinforce(self, prob_batch, irr_prob_batch, r_batch):
-        prob_batch = [self.log_prob_ordered_sampling(pr) if r>=0 else self.log_prob_ordered_sampling(ipr) for pr, ipr, r in zip(prob_batch, irr_prob_batch, r_batch)]
-        # version 2 -- constant ratio
-        # prob_batch = [self.log_prob_ordered_sampling(pr) for pr in prob_batch]
-        # version 1
-        # prob_batch = [self.log_prob_ordered_sampling(pr) if r>=0 else self.log_prob_(dpr) for pr, dpr, r in zip(prob_batch, dropped_prob_batch, r_batch)]
+    def cal_loss_reinforce(self, prob_batch, indices_batch, r_batch):
+        # strategy 3.1 -- default
+        # prob_batch = [self.log_prob_(p[idx]) for p, idx in zip(prob_batch, indices_batch["select"])]
+        # strategy 3.2
+        prob_batch = [self.log_prob_(p[idx1])-self.log_prob_(p[idx2]) for p, idx1, idx2 in zip(prob_batch, indices_batch["select_sub_ref"], indices_batch["ref_sub_select"])]
         prob_batch = torch.cat(prob_batch)
-        r_batch = self.r_post_process(r_batch).to(self.ibtn.device)
+
+        r_batch = self.r_post_process(r_batch).to(self.retriever.device)
         assert prob_batch.shape == r_batch.shape
+
         rl_loss = - (r_batch * prob_batch).mean()
         return rl_loss
     
     def forward_pass(self, batch, epoch=None, warmup=False, training=True): 
-        # 2. generate mask for the coarsely retrieved samples.
+        # TODO: 1. change batch data
         graph_batch, answer_batch, triplet_batch, triplet_batch_idx, relevant_idx_batch, question_batch, q_embd_batch, id_batch = \
             batch["graph"], batch["y"], batch["triplets"], batch['triplet_batch_idx'], batch["relevant_idx"], batch["q"], batch["q_embd"], batch["id"]
         # if epoch == 0 and training:
         #     # Prepare baseline. Will commented later.
-        #     sorted_idx_batch = [torch.arange(math.ceil(len(t) * 0.3)) for t in triplet_batch]
-        #     masked_triplets_batch, _ = self.mask_triplet(triplet_batch, sorted_idx_batch)
+        #     select_idx_batch = [torch.arange(math.ceil(len(t) * 0.3)) for t in triplet_batch]
+        #     masked_triplets_batch, _ = self.mask_triplet(triplet_batch, select_idx_batch)
         #     generation_batch = self.llms(question_batch, masked_triplets_batch)
-        #     for g,q,a,d,s in zip(generation_batch, question_batch, answer_batch, id_batch, sorted_idx_batch):
+        #     for g,q,a,d,s in zip(generation_batch, question_batch, answer_batch, id_batch, select_idx_batch):
         #         f1, prec, recall = self.reward_metrics.calc_r(g,a,q)
         #         self.baseline[d] = {
         #             "F1": f1,
@@ -140,53 +152,85 @@ class RLRE(nn.Module):
 
         # batch_size = graph_batch.num_graphs
         graph_batch, q_embd_batch, relevant_idx_batch = \
-            graph_batch.to(self.ibtn.device), q_embd_batch.to(self.ibtn.device), relevant_idx_batch.to(self.ibtn.device)
-        # Prob_batch is used to calculate loss
-        # sorted_idx_batch is used to specify the selected triplet.
-        prob_batch, _, _, sorted_idx_batch, logits_batch = self.ibtn(graph_batch, triplet_batch_idx, q_embd_batch, epoch=epoch) if not training \
-            else self.ibtn(graph_batch, triplet_batch_idx, q_embd_batch, epoch, id_batch=id_batch, baseline=self.baseline)
-        masked_triplets_batch, _ = self.mask_triplet(triplet_batch, sorted_idx_batch)
-        # The construction of irr_prob_batch
-        # irr_prob_batch = [p[~torch.isin(s_idx, r_idx)] for r_idx, s_idx, p in zip(relevant_idx_batch, sorted_idx_batch, prob_batch)]
-        # update 11/25: add baseline selection
-        # calculate rewards relative to the baseline.
-        # TODO: LLMs calc rewards
+            graph_batch.to(self.retriever.device), q_embd_batch.to(self.retriever.device), relevant_idx_batch.to(self.retriever.device)
+        # prob_batch, _, _, select_idx_batch, logits_batch = self.retriever(graph_batch, triplet_batch_idx, q_embd_batch, epoch=epoch) if not training \
+            # else self.retriever(graph_batch, triplet_batch_idx, q_embd_batch, epoch, id_batch=id_batch, baseline=self.baseline)
+
+        # TODO: 2. fill the arguments
+        attn_logits_batch = self.retriever()
+
+        prob_batch = []
+        indices_batch = {
+            "select": [],
+            "select_sub_ref": [],
+            "ref_sub_select": [],
+            "select_cap_ref": []
+        }
+        for i in range(batch.num_graphs):
+            attn_logit = attn_logits_batch[triplet_batch_idx == i]
+            attn_prob = (attn_logit / self.tau).softmax(dim=0)
+            prob_batch.append(attn_prob)
+            _, select_idx = self.sampling(attn_logit, seed=10*epoch, training=training)  # get the index of chosen triplets
+            
+            if training:
+                ref_idx = self.baseline[id_batch[i]]["baseline_selection"]
+                if self.baseline_order_invariant:
+                    select_idx = self.keep_order(ref_idx.to(self.device), select_idx)
+                indices_batch["select_sub_ref"].append(select_idx[~torch.isin(select_idx, ref_idx)])
+                indices_batch["ref_sub_select"].append(ref_idx[~torch.isin(ref_idx, select_idx)])
+                indices_batch["select_cap_ref"].append(ref_idx[torch.isin(ref_idx, select_idx)])
+            indices_batch["select"].append(select_idx)
+
+        # TODO: 3. This part can be converted to single inference, not batch inference. Single inference: can be moved into the loop.    
+        masked_triplets_batch, _ = self.mask_triplet(triplet_batch, indices_batch["select"])
         generation_batch = self.llms(question_batch, masked_triplets_batch)
-        reward_batch = self.cal_rel_r(generation_batch, question_batch, answer_batch, id_batch, training=training)
+        reward_batch = self.cal_reward(generation_batch, question_batch, answer_batch, id_batch, training=training)
         reward_loggings = {k:torch.mean(v).item() for k,v in reward_batch.items()}
         
-        if not self.training:
+        if not training:
             return 0, reward_loggings
 
-        baseline_selection_batch = [self.baseline[k].get("baseline_selection", torch.arange(len(s_idx))).to(self.ibtn.device) for s_idx, k in zip(sorted_idx_batch, id_batch)]
-        irr_prob_batch = [p[~torch.isin(s_idx, baseline_selection)] for s_idx, p, baseline_selection in zip(sorted_idx_batch, prob_batch, baseline_selection_batch)]
-
-        loss = self.coeff1 * self.cal_loss_reinforce(prob_batch, irr_prob_batch, reward_batch[self.metrics_name])
+        loss = self.coeff1 * self.cal_loss_reinforce(prob_batch, indices_batch, reward_batch[self.metrics_name])
         reward_loggings["reinforce"] = loss.item()
+        
         if self.regularize == "KL":
-            # only training calculates regularization
-            KL_reg_loss = self.coeff2 * self.cal_loss_regularize(id_batch, logits_batch)
+            KL_reg_loss = self.coeff2 * self.cal_loss_regularize(id_batch, prob_batch)
             loss += KL_reg_loss
             reward_loggings["KL"] = KL_reg_loss.item()
         if self.regularize == "wp":
-            wp_loss = self.coeff2 * self.cal_loss_warmup(torch.concat(logits_batch, dim=0), relevant_idx_batch)
+            wp_loss = self.coeff2 * self.cal_loss_warmup(attn_logits_batch, relevant_idx_batch)
             loss += wp_loss
             reward_loggings["wp"] = wp_loss.item()
-        # print(loss, reward_loggings)
-        if self.set_moving_baseline:
-            for d, logits, s_idx in zip(id_batch, logits_batch, sorted_idx_batch):
-                # self.baseline_cache[d]["logits"] = logits.detach().cpu().clone()
-                # update 11/25: add baseline selection
-                _, topk_indices = logits.topk(s_idx.shape[0], dim=0, largest=True, sorted=True)
-                # self.baseline_cache[d]["baseline_selection"] = topk_indices.detach().cpu().clone()
 
-                self.baseline_cache[d] = {
-                    # "logits": logits.detach().cpu().clone(),
-                    "baseline_selection": topk_indices.detach().cpu().clone()
-                }
+        # Update 3rd Dec: Deprecated Feature.
+
+        # if self.set_moving_baseline:
+        #     for d, logits, s_idx in zip(id_batch, logits_batch, select_idx_batch):
+        #         _, topk_indices = logits.topk(s_idx.shape[0], dim=0, largest=True, sorted=True)
+        #         self.baseline_cache[d] = {
+        #             # "logits": logits.detach().cpu().clone(),
+        #             "baseline_selection": topk_indices.detach().cpu().clone()
+        #         }
         return loss, reward_loggings
-    
-    def mask_triplet(self, triplets_batch, sorted_idx_batch):
+
+    def sampling(self, att_log_logit, seed=None, training=True):
+        """
+        strategy = "idp-bern" or "topk"
+        K only applies when `strategy` set to "topk"
+        """
+        if self.strategy == "topk":
+            K = self.filter_num_or_ratio if type(self.filter_num_or_ratio) is int else math.ceil(len(att_log_logit) * self.filter_num_or_ratio)
+            
+            if not training:
+                _, topk_indices = att_log_logit.topk(K, dim=0, largest=True, sorted=True)
+                y_hard = torch.zeros_like(att_log_logit, memory_format=torch.legacy_contiguous_format).scatter_(0, topk_indices, 1.0)
+                return y_hard, topk_indices
+            else:
+                return gumbel_topk(att_log_logit, K=K, tau=self.tau, mode="hard", dim=0, add_grumbel=self.add_gumbel, eta=self.gumbel_strength, g=self.noise_generator, seed=seed)
+        else:
+            raise NotImplementedError
+
+    def mask_triplet(self, triplets_batch, select_idx_batch):
         """
         `strategy` can be set as "drop" or "mask", "drop" as default.
         Mask tokenized triplets using attn
@@ -200,7 +244,7 @@ class RLRE(nn.Module):
             return f"({triplet[0]},{triplet[1]},{triplet[2]})"
         # Tokenize each triplet string
         masked_attns_batch, masked_triplets_batch = [], []
-        for triplets, keep_idx in zip(triplets_batch, sorted_idx_batch):
+        for triplets, keep_idx in zip(triplets_batch, select_idx_batch):
         # In this strategy, just drop the unselected triplets.
             # keep_idx = [idx for idx, score in enumerate(attns) if score.item() == 1]
             select_triplets = [triplet_to_str(triplets[idx]) for idx in keep_idx]
@@ -211,6 +255,9 @@ class RLRE(nn.Module):
         # return masked_token_ids
 
     def update_baseline(self, loader):
+        """
+        Update 3rd Dec: Deprecated Feature.
+        """
         if not self.set_moving_baseline:
             print("Not Update.")
             return False
@@ -220,8 +267,8 @@ class RLRE(nn.Module):
                 graph_batch, answer_batch, triplet_batch, triplet_batch_idx, relevant_idx_batch, question_batch, q_embd_batch, id_batch = \
                     batch["graph"], batch["y"], batch["triplets"], batch['triplet_batch_idx'], batch["relevant_idx"], batch["q"], batch["q_embd"], batch["id"]
                 
-                sorted_idx_batch = [self.baseline_cache[d]["baseline_selection"] for d in id_batch]
-                masked_triplets_batch, _ = self.mask_triplet(triplet_batch, sorted_idx_batch)
+                select_idx_batch = [self.baseline_cache[d]["baseline_selection"] for d in id_batch]
+                masked_triplets_batch, _ = self.mask_triplet(triplet_batch, select_idx_batch)
                 generation_batch = self.llms(question_batch, masked_triplets_batch)
 
                 for g,q,a,d in zip(generation_batch, question_batch, answer_batch, id_batch):
@@ -249,22 +296,22 @@ class RLRE(nn.Module):
         # print(f"{baseline_cache_metrics} smaller than {baseline_metrics}. Not Update.")
         # return False
 
+    @staticmethod
+    def keep_order(a, b):
+        overlap = [x for x in b.tolist() if x in a.tolist()]
+        if not overlap:
+            return b
+        ordered_overlap = sorted(overlap, key=lambda x: a.tolist().index(x))
 
-    @property
-    def trainable_params(self):
-        trainable_params = 0
-        all_param = 0
+        adjusted_b = []
+        overlap_index = 0
 
-        for _, param in self.named_parameters():
-            num_params = param.numel()
+        for element in b.tolist():
+            if element in a.tolist():
+                adjusted_b.append(ordered_overlap[overlap_index])
+                overlap_index += 1
+            else:
+                adjusted_b.append(element)
 
-            all_param += num_params
-            if param.requires_grad:
-                trainable_params += num_params
+        return torch.tensor(adjusted_b)
 
-        return trainable_params, all_param
-    
-    def freeze_llm(self):
-        # Freeze LLM parameters after some epochs
-        for _, param in self.llms.named_parameters():
-            param.requires_grad = False
