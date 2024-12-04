@@ -31,6 +31,10 @@ class Retriever(nn.Module):
             nn.Linear(emb_size, 1)
         )
 
+    @property
+    def device(self):
+        return list(self.parameters())[0].device
+    
     def forward(
         self,
         h_id_tensor,
@@ -42,7 +46,7 @@ class Retriever(nn.Module):
         relation_embs,
         topic_entity_one_hot
     ):
-        device = entity_embs.device
+        device = self.device
         
         h_e = torch.cat(
             [
