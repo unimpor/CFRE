@@ -18,7 +18,7 @@ def gumbel_topk(logits: Tensor, K: int, tau: float = 2, mode: str = "st", eps: f
         -torch.empty_like(logits, memory_format=torch.legacy_contiguous_format).exponential_(generator=g.manual_seed(seed)).log()
     )
         # testing.
-        print(g)
+        # print(gumbels)
     else:
         gumbels = (
             -torch.empty_like(logits, memory_format=torch.legacy_contiguous_format).exponential_().log()

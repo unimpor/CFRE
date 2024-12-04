@@ -39,49 +39,30 @@ class Retriever(nn.Module):
     
     def forward(
         self,
-        h_id_tensor,
-        r_id_tensor,
-        t_id_tensor,
+        graph,
         q_emb,
-        entity_embs,
-        num_non_text_entities,
-        relation_embs,
-        topic_entity_one_hot
     ):
         device = self.device
+        x, edge_index, edge_attr, topic_entity_one_hot = graph.x, graph.edge_index, graph.edge_attr, graph.topic_signal
+        # replace all-zero row with nn.embeddings
+        x[(x==0).all(dim=1)] = self.non_text_entity_emb(torch.LongTensor([0]).to(device))
         
-        h_e = torch.cat(
-            [
-                entity_embs,
-                self.non_text_entity_emb(
-                    torch.LongTensor([0]).to(device)).expand(num_non_text_entities, -1)
-            ]
-        , dim=0)
-        h_e_list = [h_e]
+        h_e_list = [x]
         if self.topic_pe:
             h_e_list.append(topic_entity_one_hot)
-
-        edge_index = torch.stack([
-            h_id_tensor,
-            t_id_tensor
-        ], dim=0)
-        reverse_edge_index = torch.stack([
-            t_id_tensor,
-            h_id_tensor
-        ], dim=0)
-        dde_list = self.dde(topic_entity_one_hot, edge_index, reverse_edge_index)
+        
+        dde_list = self.dde(topic_entity_one_hot, edge_index, edge_index.flip(0))
         h_e_list.extend(dde_list)
         h_e = torch.cat(h_e_list, dim=1)
 
-        h_q = q_emb
         # Potentially memory-wise problematic
-        h_r = relation_embs[r_id_tensor]
-
+        
+        h_id_tensor, t_id_tensor = edge_index
         h_triple = torch.cat([
-            h_q.expand(len(h_r), -1),
+            q_emb,
             h_e[h_id_tensor],
-            h_r,
+            edge_attr,
             h_e[t_id_tensor]
         ], dim=1)
         
-        return self.pred(h_triple)
+        return self.pred(h_triple).squeeze()

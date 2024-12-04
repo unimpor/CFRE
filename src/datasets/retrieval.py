@@ -61,7 +61,7 @@ class RetrievalDataset:
             # non-text entities as all-zeros
             x = torch.cat([x_ent, torch.zeros(len(sample['non_text_entity_list']), x_ent.size(1))], dim=0)
             edge_index = torch.stack([torch.tensor(h_id_list), 
-                                      torch.tensor(t_id_list)], axis=0),
+                                      torch.tensor(t_id_list)], axis=0)
             edge_attr = sample_embd['relation_embs'][r_id_list]
 
             processed_sample = {
