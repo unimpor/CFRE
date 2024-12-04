@@ -84,5 +84,4 @@ def collate_fn(batch_org):
     # combined_list = sum(batch['triplets'], [])
     # a = [combined_list[idx.item()] for idx in batch['relevant_idx']]
     # b = sum([[d['triplets'][idx] for idx in d['relevant_idx']] for d in batch_org], [])
-
     return batch

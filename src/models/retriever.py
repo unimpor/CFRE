@@ -10,20 +10,22 @@ from src.models.dde import DDE
 class Retriever(nn.Module):
     def __init__(
         self,
-        emb_size,
-        topic_pe,
-        kwargs
+        config,
+        **kwargs
     ):
         super().__init__()
-        
+        emb_size = config['hidden_size']
+        model_type = config['model_type']
+        model_kwargs = config[model_type]
+
         self.non_text_entity_emb = nn.Embedding(1, emb_size)
-        self.topic_pe = topic_pe
-        self.dde = DDE(**kwargs)
+        self.topic_pe = config["topic_pe"]
+        self.dde = DDE(**model_kwargs)
         
         pred_in_size = 4 * emb_size
-        if topic_pe:
+        if self.topic_pe:
             pred_in_size += 2 * 2
-        pred_in_size += 2 * 2 * (kwargs['num_rounds'] + kwargs['num_reverse_rounds'])
+        pred_in_size += 2 * 2 * (model_kwargs['num_rounds'] + model_kwargs['num_reverse_rounds'])
 
         self.pred = nn.Sequential(
             nn.Linear(pred_in_size, emb_size),

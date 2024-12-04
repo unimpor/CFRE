@@ -2,8 +2,7 @@ dataset:
   name: &dataset 'webqsp'
   root: ./datasets
   emb_name: 'gte-large-en-v1.5'
-  coarse_filter: False
-  coarse_num_or_ratio: 300
+  post_filter: False
   skip_no_path: True
 
 env:
@@ -44,13 +43,13 @@ train:
   
 # graphsage
 retriever:
-  gnn:
-    model_type: &gnn PNA
-    topic_pe: False
-    hidden_size: 1024
-    num_layers: 4
-    aggr: 'mean'
-    learn_non_text: False
+  model_type: &gnn DDE
+  topic_pe: True
+  hidden_size: 1024
+  learn_non_text: False
+  DDE:
+    num_rounds: 2
+    num_reverse_rounds: 2
 
 algorithm:
   filtering: topk # "topk" or "idp-bern"
