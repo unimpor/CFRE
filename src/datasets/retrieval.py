@@ -17,7 +17,10 @@ class RetrievalDataset:
         self.root = config['root']
         self.data_name = config['name']
         self.post_filter = config["post_filter"]
-        self.filtering_id = self._load_data(self.post_filter) if self.post_filter else None
+        self.filtering_id = None
+        if self.post_filter:
+            reference = self._load_data(opj(self.root, self.data_name, "checkpoints", self.post_filter))
+            self.filtering_id = [k for k,v in reference.items() if v["F1"]==1.0]
         
         if os.path.exists(self.processed_file_names):
             print('Load processed file..')
@@ -25,9 +28,10 @@ class RetrievalDataset:
         else:
             raw_data = self._load_data(opj(self.root, self.data_name, "processed", f"{self.split}.pkl"))
             # which contains some coarse retrieval results and shorted-path relevant info
-            scored_data = self._load_data(opj(self.root, self.data_name, "processed", f"webqsp_241028_{self.split}.pth"))
+            scored_data = self._load_data(opj(self.root, self.data_name, "processed", f"{self.data_name}_241028_{self.split}.pth"))
             # 'target_relevant_triples' 'scored_triples'
             embs = self._load_emb()
+            # print(len(raw_data), len(scored_data))
             self.processed_data = self.process(raw_data, scored_data, embs)
 
     @property
@@ -39,11 +43,13 @@ class RetrievalDataset:
         processed_data = []
         for sample in raw_data:
             sample_id = sample['id']
-            sample_scored = scored_data[sample_id]
+            sample_scored = scored_data.get(sample_id, None)
 
+            if not sample_scored:
+                continue
             if self.config['skip_no_path'] and (sample_scored['max_path_length'] in [None, 0]):
                 continue
-            if self.post_filter and sample_id in self.filtering_id:
+            if self.split=="train" and self.post_filter and sample_id in self.filtering_id:
                 continue  
             sample_embd = embs[sample_id] # 'entity_embs', 'q_emb', 'relation_embs'
             

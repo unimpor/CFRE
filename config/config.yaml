@@ -2,7 +2,7 @@ dataset:
   name: &dataset 'webqsp'
   root: ./datasets
   emb_name: 'gte-large-en-v1.5'
-  post_filter: False
+  post_filter: "metrics_rev_scored_100.pth"
   skip_no_path: True
 
 env:
@@ -21,10 +21,8 @@ llms:
   seed: 0 
   temperature: 0 
   frequency_penalty: 0.14
-  prompt_mode: "sys_icl_dc"
+  prompt_mode: sys_icl_dc_reverse
   
-
-# TODO: hyper-param from G-Retriever
 train:
   warmup:
     lr: 0.001
@@ -37,7 +35,7 @@ train:
   wd_llm: 0.05  # deprecated
   num_epochs: 50
   patience: 6
-  batch_size: 32
+  batch_size: 16
   grad_steps: 5 # deprecated
   llm_frozen_epoch: 5 # deprecated
   

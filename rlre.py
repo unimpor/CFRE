@@ -10,9 +10,9 @@ class RLRE(nn.Module):
     """
     RL driven Retriver, better aligned with LLM reasoning capability.
     """
-    def __init__(self, fg_retriever, llm_model, config, **kwargs):
+    def __init__(self, retriever, llm_model, config, **kwargs):
         super().__init__()
-        self.retriever = fg_retriever
+        self.retriever = retriever
         self.llms = llm_model
         self.coeff1 = float(config['coeff1'])  # trade-off coeff between RL and regularization
         self.coeff2 = float(config['coeff2'])
@@ -21,7 +21,7 @@ class RLRE(nn.Module):
         self.reward_metrics = RewardMetrics(self.metrics_name)
         self.perturb_per_sample = config["perturb_per_sample"]  # Use 1. Not used in this method.
         self.regularize = config["regularize"]
-        self.baseline = torch.load("/home/comp/cscxliu/derek/CFRE/datasets/webqsp/checkpoints/reference.pth")
+        self.baseline = torch.load("/home/comp/cscxliu/derek/CFRE/datasets/webqsp/checkpoints/metrics_rev_scored_100.pth")
         self.baseline_cache = {}
         self.set_moving_baseline = config["set_moving_baseline"]
         self.eps = 1e-5  # for numerical stability
@@ -32,7 +32,7 @@ class RLRE(nn.Module):
         self.gumbel_strength = config["gumbel_strength"]
         self.tau = float(config["tau"])
         self.baseline_order_invariant = config["baseline_order_invariant"]
-        self.noise_generator = torch.Generator()
+        self.noise_generator = torch.Generator(device=self.device)
         
         # deprecated.
         # self.add_gumbel = config["gumbel"]
@@ -47,6 +47,7 @@ class RLRE(nn.Module):
     def cal_reward(self, g_batch, q_batch, a_batch, id_batch, training):
         """
         Given query and retrieved triplets, return the reward rerlative to the ``baseline''.
+        # TODO: We may need to change it to single inference version.
         """
         reward_batch = {
             "F1": torch.empty(0, dtype=torch.float),
@@ -126,14 +127,15 @@ class RLRE(nn.Module):
         prob_batch = [self.log_prob_(p[idx1])-self.log_prob_(p[idx2]) for p, idx1, idx2 in zip(prob_batch, indices_batch["select_sub_ref"], indices_batch["ref_sub_select"])]
         prob_batch = torch.cat(prob_batch)
 
-        r_batch = self.r_post_process(r_batch).to(self.retriever.device)
+        r_batch = self.r_post_process(r_batch).to(prob_batch.device)
+        print(r_batch)
+        input(0)
         assert prob_batch.shape == r_batch.shape
 
         rl_loss = - (r_batch * prob_batch).mean()
         return rl_loss
     
     def forward_pass(self, batch, epoch=None, warmup=False, training=True): 
-        # TODO: 1. change batch data
         graph_batch, answer_batch, triplet_batch, triplet_batch_idx, relevant_idx_batch, question_batch, q_embd_batch, id_batch = \
             batch["graph"], batch["y"], batch["triplets"], batch['triplet_batch_idx'], batch["relevant_idx"], batch["q"], batch["q_embd"], batch["id"]
         # if epoch == 0 and training:
@@ -147,7 +149,7 @@ class RLRE(nn.Module):
         #             "F1": f1,
         #             "precision": prec,
         #             "recall": recall,
-        #             "baseline_selection": s
+        #             "selection": s
         #         }
 
         # batch_size = graph_batch.num_graphs
@@ -155,9 +157,7 @@ class RLRE(nn.Module):
             graph_batch.to(self.retriever.device), q_embd_batch.to(self.retriever.device), relevant_idx_batch.to(self.retriever.device)
         # prob_batch, _, _, select_idx_batch, logits_batch = self.retriever(graph_batch, triplet_batch_idx, q_embd_batch, epoch=epoch) if not training \
             # else self.retriever(graph_batch, triplet_batch_idx, q_embd_batch, epoch, id_batch=id_batch, baseline=self.baseline)
-
-        # TODO: 2. fill the arguments
-        attn_logits_batch = self.retriever()
+        attn_logits_batch = self.retriever(graph_batch, q_embd_batch)
 
         prob_batch = []
         indices_batch = {
@@ -166,14 +166,13 @@ class RLRE(nn.Module):
             "ref_sub_select": [],
             "select_cap_ref": []
         }
-        for i in range(batch.num_graphs):
+        for i in range(len(id_batch)):
             attn_logit = attn_logits_batch[triplet_batch_idx == i]
             attn_prob = (attn_logit / self.tau).softmax(dim=0)
             prob_batch.append(attn_prob)
             _, select_idx = self.sampling(attn_logit, seed=10*epoch, training=training)  # get the index of chosen triplets
-            
             if training:
-                ref_idx = self.baseline[id_batch[i]]["baseline_selection"]
+                ref_idx = torch.tensor(self.baseline[id_batch[i]]["selection"])
                 if self.baseline_order_invariant:
                     select_idx = self.keep_order(ref_idx.to(self.device), select_idx)
                 indices_batch["select_sub_ref"].append(select_idx[~torch.isin(select_idx, ref_idx)])
@@ -209,7 +208,7 @@ class RLRE(nn.Module):
         #         _, topk_indices = logits.topk(s_idx.shape[0], dim=0, largest=True, sorted=True)
         #         self.baseline_cache[d] = {
         #             # "logits": logits.detach().cpu().clone(),
-        #             "baseline_selection": topk_indices.detach().cpu().clone()
+        #             "selection": topk_indices.detach().cpu().clone()
         #         }
         return loss, reward_loggings
 
@@ -226,7 +225,7 @@ class RLRE(nn.Module):
                 y_hard = torch.zeros_like(att_log_logit, memory_format=torch.legacy_contiguous_format).scatter_(0, topk_indices, 1.0)
                 return y_hard, topk_indices
             else:
-                return gumbel_topk(att_log_logit, K=K, tau=self.tau, mode="hard", dim=0, add_grumbel=self.add_gumbel, eta=self.gumbel_strength, g=self.noise_generator, seed=seed)
+                return gumbel_topk(att_log_logit, K=K, tau=self.tau, mode="hard", dim=0, eta=self.gumbel_strength, g=self.noise_generator, seed=seed)
         else:
             raise NotImplementedError
 
@@ -267,7 +266,7 @@ class RLRE(nn.Module):
                 graph_batch, answer_batch, triplet_batch, triplet_batch_idx, relevant_idx_batch, question_batch, q_embd_batch, id_batch = \
                     batch["graph"], batch["y"], batch["triplets"], batch['triplet_batch_idx'], batch["relevant_idx"], batch["q"], batch["q_embd"], batch["id"]
                 
-                select_idx_batch = [self.baseline_cache[d]["baseline_selection"] for d in id_batch]
+                select_idx_batch = [self.baseline_cache[d]["selection"] for d in id_batch]
                 masked_triplets_batch, _ = self.mask_triplet(triplet_batch, select_idx_batch)
                 generation_batch = self.llms(question_batch, masked_triplets_batch)
 

@@ -37,6 +37,8 @@ class LLMs(nn.Module):
         """
         Generation conversation given a query-triplet pair.
         """
+        if "reverse" in self.prompt_mode:
+            input_triplets.reverse()
         triplet_prompt = "Triplets:\n" + "\n".join(input_triplets)
         question_prompt = "Question:\n" + query
         if question_prompt[-1] != '?':
