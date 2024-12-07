@@ -20,7 +20,7 @@ class RetrievalDataset:
         self.filtering_id = None
         if self.post_filter:
             reference = self._load_data(opj(self.root, self.data_name, "checkpoints", self.post_filter))
-            self.filtering_id = [k for k,v in reference.items() if v["F1"]==1.0]
+            self.filtering_id = [k for k,v in reference.items() if v["recall"]==1.0]
         
         if os.path.exists(self.processed_file_names):
             print('Load processed file..')

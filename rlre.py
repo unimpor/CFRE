@@ -33,7 +33,7 @@ class RLRE(nn.Module):
         self.tau = float(config["tau"])
         self.baseline_order_invariant = config["baseline_order_invariant"]
         self.noise_generator = torch.Generator(device=self.device)
-        
+        self.sigma = nn.LogSigmoid()
         # deprecated.
         # self.add_gumbel = config["gumbel"]
         # self.constant_ratio = config["constant_ratio"]
@@ -42,7 +42,7 @@ class RLRE(nn.Module):
         # self.strategy = config['triplet2text']
     @property
     def device(self):
-        return list(self.parameters())[0].device
+        return self.retriever.device
 
     def cal_reward(self, g_batch, q_batch, a_batch, id_batch, training):
         """
@@ -103,7 +103,7 @@ class RLRE(nn.Module):
         # option 2
         # a = torch.where((a >= beta) & (a < 0), torch.zeros_like(a), a)
         # option 3
-        # a = torch.where(a < 0, torch.zeros_like(a), a)
+        a = torch.where(a < 0, torch.zeros_like(a), a)
         
         return torch.sign(a)
     
@@ -114,9 +114,9 @@ class RLRE(nn.Module):
         return dir_loss
     
     def cal_loss_regularize(self, id_batch, prob_batch):
-        loss = torch.empty(0, dtype=torch.float, device=self.retriever.device)
+        loss = torch.empty(0, dtype=torch.float, device=self.device)
         for sample_id, P in zip(id_batch, prob_batch):
-            Q = (self.baseline[sample_id]["logits"] / self.tau).softmax(dim=0).to(self.retriever.device)
+            Q = (self.baseline[sample_id]["logits"] / self.tau).softmax(dim=0).to(self.device)
             loss = torch.cat((loss, torch.sum(P * (torch.log(P+self.eps)-torch.log(Q+self.eps)), dim=0, keepdim=True)))
         return loss.mean()
         
@@ -124,12 +124,10 @@ class RLRE(nn.Module):
         # strategy 3.1 -- default
         # prob_batch = [self.log_prob_(p[idx]) for p, idx in zip(prob_batch, indices_batch["select"])]
         # strategy 3.2
-        prob_batch = [self.log_prob_(p[idx1])-self.log_prob_(p[idx2]) for p, idx1, idx2 in zip(prob_batch, indices_batch["select_sub_ref"], indices_batch["ref_sub_select"])]
+        prob_batch = [self.sigma(self.log_prob_(p[idx1])-self.log_prob_(p[idx2])) for p, idx1, idx2 in zip(prob_batch, indices_batch["select_sub_ref"], indices_batch["ref_sub_select"])]
         prob_batch = torch.cat(prob_batch)
 
         r_batch = self.r_post_process(r_batch).to(prob_batch.device)
-        print(r_batch)
-        input(0)
         assert prob_batch.shape == r_batch.shape
 
         rl_loss = - (r_batch * prob_batch).mean()
@@ -154,7 +152,7 @@ class RLRE(nn.Module):
 
         # batch_size = graph_batch.num_graphs
         graph_batch, q_embd_batch, relevant_idx_batch = \
-            graph_batch.to(self.retriever.device), q_embd_batch.to(self.retriever.device), relevant_idx_batch.to(self.retriever.device)
+            graph_batch.to(self.device), q_embd_batch.to(self.device), relevant_idx_batch.to(self.device)
         # prob_batch, _, _, select_idx_batch, logits_batch = self.retriever(graph_batch, triplet_batch_idx, q_embd_batch, epoch=epoch) if not training \
             # else self.retriever(graph_batch, triplet_batch_idx, q_embd_batch, epoch, id_batch=id_batch, baseline=self.baseline)
         attn_logits_batch = self.retriever(graph_batch, q_embd_batch)
@@ -172,9 +170,9 @@ class RLRE(nn.Module):
             prob_batch.append(attn_prob)
             _, select_idx = self.sampling(attn_logit, seed=10*epoch, training=training)  # get the index of chosen triplets
             if training:
-                ref_idx = torch.tensor(self.baseline[id_batch[i]]["selection"])
+                ref_idx = torch.tensor(self.baseline[id_batch[i]]["selection"], device=self.device)
                 if self.baseline_order_invariant:
-                    select_idx = self.keep_order(ref_idx.to(self.device), select_idx)
+                    select_idx = self.keep_order(ref_idx, select_idx)
                 indices_batch["select_sub_ref"].append(select_idx[~torch.isin(select_idx, ref_idx)])
                 indices_batch["ref_sub_select"].append(ref_idx[~torch.isin(ref_idx, select_idx)])
                 indices_batch["select_cap_ref"].append(ref_idx[torch.isin(ref_idx, select_idx)])
@@ -219,7 +217,7 @@ class RLRE(nn.Module):
         """
         if self.strategy == "topk":
             K = self.filter_num_or_ratio if type(self.filter_num_or_ratio) is int else math.ceil(len(att_log_logit) * self.filter_num_or_ratio)
-            
+            K = min(K, att_log_logit.shape[0])
             if not training:
                 _, topk_indices = att_log_logit.topk(K, dim=0, largest=True, sorted=True)
                 y_hard = torch.zeros_like(att_log_logit, memory_format=torch.legacy_contiguous_format).scatter_(0, topk_indices, 1.0)
@@ -295,8 +293,7 @@ class RLRE(nn.Module):
         # print(f"{baseline_cache_metrics} smaller than {baseline_metrics}. Not Update.")
         # return False
 
-    @staticmethod
-    def keep_order(a, b):
+    def keep_order(self, a, b):
         overlap = [x for x in b.tolist() if x in a.tolist()]
         if not overlap:
             return b
@@ -312,5 +309,5 @@ class RLRE(nn.Module):
             else:
                 adjusted_b.append(element)
 
-        return torch.tensor(adjusted_b)
+        return torch.tensor(adjusted_b, device=self.device)
 

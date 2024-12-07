@@ -2,7 +2,7 @@ import torch
 
 
 def setup_wp_optimizer(cfre, config):
-    params = [p for name, p in cfre.named_parameters() if p.requires_grad and "ibtn" in name]
+    params = [p for name, p in cfre.named_parameters() if p.requires_grad and "retriever" in name]
     return torch.optim.AdamW(
         [{'params': params, 'lr': float(config["lr"]), 'weight_decay': config["wd"]}, ],
         betas=(0.9, 0.95)
@@ -10,7 +10,7 @@ def setup_wp_optimizer(cfre, config):
 
 
 def setup_tr_optimizer(cfre, config):
-    ibtn_params = [p for name, p in cfre.named_parameters() if p.requires_grad and "ibtn" in name]
+    ibtn_params = [p for name, p in cfre.named_parameters() if p.requires_grad and "retriever" in name]
     # llm_params = [p for name, p in cfre.named_parameters() if p.requires_grad and "llm" in name]
 
     return torch.optim.AdamW(
