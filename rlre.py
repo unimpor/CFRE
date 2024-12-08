@@ -44,7 +44,7 @@ class RLRE(nn.Module):
     def device(self):
         return self.retriever.device
 
-    def cal_reward(self, g_batch, q_batch, a_batch, id_batch, training):
+    def cal_reward(self, g_batch, q_batch, a_batch, id_batch, idx_batch, training):
         """
         Given query and retrieved triplets, return the reward rerlative to the ``baseline''.
         # TODO: We may need to change it to single inference version.
@@ -54,14 +54,24 @@ class RLRE(nn.Module):
             "precision": torch.empty(0, dtype=torch.float),
             "recall": torch.empty(0, dtype=torch.float),
         }
-        for g,q,a,d in zip(g_batch, q_batch, a_batch, id_batch):
-            f1, prec, recall = self.reward_metrics.calc_r(g,a,q)
+        for g,q,a,d,idx in zip(g_batch, q_batch, a_batch, id_batch, idx_batch):
+            f1_abs, prec_abs, recall_abs = self.reward_metrics.calc_r(g,a,q)
             # only the training needs relative to baselines.
             # if self.set_moving_baseline and training:
             #     self.baseline_cache[d] = {'F1': f1, 'precision': prec, 'recall': recall}
             if training:
                 baseline = self.baseline[d]
-                f1, prec, recall = f1-baseline["F1"], prec-baseline["precision"], recall-baseline["recall"]
+                f1, prec, recall = f1_abs-baseline["F1"], prec_abs-baseline["precision"], recall_abs-baseline["recall"]
+                if recall > 0:
+                    print(f"Update baseline for {d}.")
+                    self.baseline[d] = {
+                        "F1": f1_abs,
+                        "precision": prec_abs,
+                        "recall": recall_abs,
+                        "selection": idx.cpu().clone()
+                    }
+            else:
+                f1, prec, recall = f1_abs, prec_abs, recall_abs
             reward_batch["F1"] = torch.cat((reward_batch["F1"], torch.tensor([f1])))
             reward_batch["precision"] = torch.cat((reward_batch["precision"], torch.tensor([prec])))
             reward_batch["recall"] = torch.cat((reward_batch["recall"], torch.tensor([recall])))
@@ -103,7 +113,7 @@ class RLRE(nn.Module):
         # option 2
         # a = torch.where((a >= beta) & (a < 0), torch.zeros_like(a), a)
         # option 3
-        a = torch.where(a < 0, torch.zeros_like(a), a)
+        # a = torch.where(a < 0, torch.zeros_like(a), a)
         
         return torch.sign(a)
     
@@ -124,13 +134,13 @@ class RLRE(nn.Module):
         # strategy 3.1 -- default
         # prob_batch = [self.log_prob_(p[idx]) for p, idx in zip(prob_batch, indices_batch["select"])]
         # strategy 3.2
-        prob_batch = [self.sigma(self.log_prob_(p[idx1])-self.log_prob_(p[idx2])) for p, idx1, idx2 in zip(prob_batch, indices_batch["select_sub_ref"], indices_batch["ref_sub_select"])]
+        prob_batch = [self.log_prob_(p[idx1])-self.log_prob_(p[idx2]) for p, idx1, idx2 in zip(prob_batch, indices_batch["select_sub_ref"], indices_batch["ref_sub_select"])]
         prob_batch = torch.cat(prob_batch)
 
         r_batch = self.r_post_process(r_batch).to(prob_batch.device)
         assert prob_batch.shape == r_batch.shape
 
-        rl_loss = - (r_batch * prob_batch).mean()
+        rl_loss = - self.sigma(r_batch * prob_batch).mean()
         return rl_loss
     
     def forward_pass(self, batch, epoch=None, warmup=False, training=True): 
@@ -181,7 +191,7 @@ class RLRE(nn.Module):
         # TODO: 3. This part can be converted to single inference, not batch inference. Single inference: can be moved into the loop.    
         masked_triplets_batch, _ = self.mask_triplet(triplet_batch, indices_batch["select"])
         generation_batch = self.llms(question_batch, masked_triplets_batch)
-        reward_batch = self.cal_reward(generation_batch, question_batch, answer_batch, id_batch, training=training)
+        reward_batch = self.cal_reward(generation_batch, question_batch, answer_batch, id_batch, indices_batch["select"], training=training)
         reward_loggings = {k:torch.mean(v).item() for k,v in reward_batch.items()}
         
         if not training:
@@ -198,7 +208,6 @@ class RLRE(nn.Module):
             wp_loss = self.coeff2 * self.cal_loss_warmup(attn_logits_batch, relevant_idx_batch)
             loss += wp_loss
             reward_loggings["wp"] = wp_loss.item()
-
         # Update 3rd Dec: Deprecated Feature.
 
         # if self.set_moving_baseline:
@@ -208,6 +217,7 @@ class RLRE(nn.Module):
         #             # "logits": logits.detach().cpu().clone(),
         #             "selection": topk_indices.detach().cpu().clone()
         #         }
+        print(reward_loggings)
         return loss, reward_loggings
 
     def sampling(self, att_log_logit, seed=None, training=True):
