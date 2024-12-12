@@ -46,6 +46,7 @@ def train(num_epochs, patience, cfre, train_loader, val_loader, optimizer, log_d
     for epoch in tqdm(range(num_epochs)):        
         cfre.train()
         cfre.baseline_cache = {}  # set empty to baseline cache at the start of every epoch.
+        cfre.update_num = 0
         epoch_loss, accum_loss, val_loss = 0., 0., 0.
         all_loss_dict, all_loss_dict_val = {}, {}
         for _, batch in enumerate(train_loader):
@@ -55,7 +56,7 @@ def train(num_epochs, patience, cfre, train_loader, val_loader, optimizer, log_d
             loss.backward()
             for k, v in loss_dict.items():
                 all_loss_dict[k] = all_loss_dict.get(k, 0) + v
-            clip_grad_norm_(optimizer.param_groups[0]['params'], 0.1)
+            # clip_grad_norm_(optimizer.param_groups[0]['params'], 0.1)
             optimizer.step()
             epoch_loss = epoch_loss + loss.item()
 
@@ -97,7 +98,8 @@ def train(num_epochs, patience, cfre, train_loader, val_loader, optimizer, log_d
             #     write_log(f'Epoch {epoch} Update Baseline!', loggings)
         
         write_log(f'Epoch {epoch} Val Loss {val_loss} Best Val signal {best_val_signal} Best Epoch {best_epoch}', loggings)
-
+        write_log(f"Epoch: {epoch}|{num_epochs}. Update {cfre.update_num} training samples to better.", loggings)
+        
         if epoch - best_epoch >= patience:
             write_log(f'Early stop at epoch {epoch}', loggings)
             save_checkpoint(cfre.retriever, epoch, log_dir, filename="final.pth")
