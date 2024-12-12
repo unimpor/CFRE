@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from src.utils import PLACEHOLDER, RewardMetrics, gumbel_topk
 import copy
+import random
 import math
 
 
@@ -22,18 +23,21 @@ class RLRE(nn.Module):
         self.perturb_per_sample = config["perturb_per_sample"]  # Use 1. Not used in this method.
         self.regularize = config["regularize"]
         self.baseline = torch.load("/home/comp/cscxliu/derek/CFRE/datasets/webqsp/checkpoints/metrics_rev_scored_100.pth")
+        for k, v in self.baseline.items():
+            self.baseline[k]["positive"] = {}
         self.baseline_cache = {}
         self.set_moving_baseline = config["set_moving_baseline"]
-        self.eps = 1e-5  # for numerical stability
+        self.eps = 1e-6  # for numerical stability
         self.tau = float(config["tau"])  # for building distribution
         self.criterion = nn.BCEWithLogitsLoss(reduction="mean")
         self.strategy = config["filtering"]
         self.filter_num_or_ratio = config["filtering_num_or_ratio"]
-        self.gumbel_strength = config["gumbel_strength"]
+        self.gumbel_strength = float(config["gumbel_strength"])
         self.tau = float(config["tau"])
         self.baseline_order_invariant = config["baseline_order_invariant"]
         self.noise_generator = torch.Generator(device=self.device)
         self.sigma = nn.LogSigmoid()
+        self.update_num = 0
         # deprecated.
         # self.add_gumbel = config["gumbel"]
         # self.constant_ratio = config["constant_ratio"]
@@ -44,7 +48,7 @@ class RLRE(nn.Module):
     def device(self):
         return self.retriever.device
 
-    def cal_reward(self, g_batch, q_batch, a_batch, id_batch, idx_batch, training):
+    def cal_reward(self, g_batch, q_batch, a_batch, id_batch, idx_batch, epoch, training):
         """
         Given query and retrieved triplets, return the reward rerlative to the ``baseline''.
         # TODO: We may need to change it to single inference version.
@@ -62,14 +66,20 @@ class RLRE(nn.Module):
             if training:
                 baseline = self.baseline[d]
                 f1, prec, recall = f1_abs-baseline["F1"], prec_abs-baseline["precision"], recall_abs-baseline["recall"]
-                if recall > 0:
+                # if (epoch+1) % 3 == 0:
+                #     self.baseline[d]["positive"] = {}
+                
+                # if recall > 0:
+                #     for i in idx.cpu().tolist():
+                #         self.baseline[d]["positive"][i] = 1 if i not in self.baseline[d]["positive"] else self.baseline[d]["positive"][i] + 5
+                
+                if recall > 0  and random.SystemRandom().random() < 0.5 and (epoch+1) % 4 == 0:
                     print(f"Update baseline for {d}.")
-                    self.baseline[d] = {
-                        "F1": f1_abs,
-                        "precision": prec_abs,
-                        "recall": recall_abs,
-                        "selection": idx.cpu().clone()
-                    }
+                    self.update_num += 1
+                    self.baseline[d]["F1"] = f1_abs
+                    self.baseline[d]["precision"] = prec_abs
+                    self.baseline[d]["recall"] = recall_abs
+                    self.baseline[d]["selection"] = idx.cpu().clone()
             else:
                 f1, prec, recall = f1_abs, prec_abs, recall_abs
             reward_batch["F1"] = torch.cat((reward_batch["F1"], torch.tensor([f1])))
@@ -83,19 +93,26 @@ class RLRE(nn.Module):
         sum_{r=1}^K log(p_{i_r}) - sum_{r=1}^K log(1 - sum_{l=1}^{r-1} p_{i_l})
         """
         if p.numel() == 0:
-            return torch.tensor(0.0, device=p.device)
+            return torch.tensor([0.0], device=p.device)
         return torch.log(p + self.eps).mean(dim=0, keepdim=True) - torch.log(1. - torch.cumsum(p, dim=0)[:-1] + self.eps).mean(dim=0, keepdim=True)
     
     def log_prob_(self, p):
         """
         w.o. the order prior
         """
+        print(p.shape)
         if p.numel() == 0:
-            return torch.tensor(0.0, device=p.device)
+            return torch.tensor([0.0], device=p.device)
         return torch.log(p + self.eps).mean(dim=0, keepdim=True)
     
-    def log_prob_weighted(self, p):
-        pass
+    def log_prob_weighted(self, p_org, idx1, dat_id):
+        p = p_org[idx1]
+        if p.numel() == 0:
+            return torch.tensor([0.0], device=p.device)
+        logp = torch.log(p + self.eps)
+        w = [self.baseline[dat_id]["positive"][i] for i in idx1.cpu().tolist()]
+        w = torch.tensor(w, device=logp.device, dtype=logp.dtype)
+        return torch.sum(logp * w, dim=0, keepdim=True) / torch.sum(w, dim=0, keepdim=True)
 
     def r_post_process(self, a, alpha=0.001, beta=-0.15):
         """
@@ -134,16 +151,49 @@ class RLRE(nn.Module):
         # strategy 3.1 -- default
         # prob_batch = [self.log_prob_(p[idx]) for p, idx in zip(prob_batch, indices_batch["select"])]
         # strategy 3.2
-        prob_batch = [self.log_prob_(p[idx1])-self.log_prob_(p[idx2]) for p, idx1, idx2 in zip(prob_batch, indices_batch["select_sub_ref"], indices_batch["ref_sub_select"])]
-        prob_batch = torch.cat(prob_batch)
+        r_batch = self.r_post_process(r_batch).to(self.device)
 
-        r_batch = self.r_post_process(r_batch).to(prob_batch.device)
-        assert prob_batch.shape == r_batch.shape
+        re_prob_batch = [self.log_prob_(p[idx1])-self.log_prob_(p[idx2]) for p, idx1, idx2 in zip(prob_batch, indices_batch["select_sub_ref"], indices_batch["ref_sub_select"])]
+        gt_prob_batch = [self.log_prob_(p[idx]) for p, idx in zip(prob_batch, indices_batch['gt'])]
+        
+        re_prob_batch = torch.cat(re_prob_batch)
+        gt_prob_batch = torch.cat(gt_prob_batch)
 
-        rl_loss = - self.sigma(r_batch * prob_batch).mean()
+        rl_loss = - self.sigma(r_batch * re_prob_batch + gt_prob_batch).mean()
         return rl_loss
     
-    def forward_pass(self, batch, epoch=None, warmup=False, training=True): 
+    def cal_loss_reinforce_v2(self, prob_batch, indices_batch, r_batch):
+        r_batch = self.r_post_process(r_batch).to(self.device)
+        # r_batch = r_batch.to(self.device)
+
+        def combine_idx(idx1, idx2):
+            return list(set(idx1) | set(idx2))
+        
+        prob_batch_pos = [self.log_prob_(p[idx1]) if r<=0 else self.log_prob_(p[combine_idx(idx1, gt_idx)]) for p, idx1, r, gt_idx in zip(prob_batch, indices_batch["select_sub_ref"], r_batch, indices_batch["gt"])]
+        prob_batch_neg = [self.log_prob_(p[idx2]) if r>0 else self.log_prob_(p[combine_idx(idx2, gt_idx)]) for p, idx2, r, gt_idx in zip(prob_batch, indices_batch["ref_sub_select"], r_batch, indices_batch["gt"])]        
+        
+        prob_batch_pos = torch.cat(prob_batch_pos)
+        prob_batch_neg = torch.cat(prob_batch_neg)
+
+        rl_loss = - self.sigma(r_batch * (prob_batch_pos-prob_batch_neg)).mean()
+        return rl_loss
+    
+    def cal_loss_reinforce_v3(self, prob_batch, indices_batch, r_batch):
+        # r_batch = self.r_post_process(r_batch).to(self.device)
+        r_batch = r_batch.to(self.device)
+
+        def combine_idx(idx1, idx2):
+            return list(set(idx1) | set(idx2))
+        prob_batch_pos = [self.log_prob_(1-p[idx1]) if r<=0 else self.log_prob_(p[combine_idx(idx1, gt_idx)]) for p, idx1, r, gt_idx in zip(prob_batch, indices_batch["select_sub_ref"], r_batch, indices_batch["gt"])]
+        prob_batch_neg = [self.log_prob_(1-p[idx2]) if r>0 else self.log_prob_(p[combine_idx(idx2, gt_idx)]) for p, idx2, r, gt_idx in zip(prob_batch, indices_batch["ref_sub_select"], r_batch, indices_batch["gt"])]        
+        
+        prob_batch_pos = torch.cat(prob_batch_pos)
+        prob_batch_neg = torch.cat(prob_batch_neg)
+
+        rl_loss = - (torch.abs(r_batch) * (prob_batch_pos+prob_batch_neg)).mean()
+        return rl_loss
+    
+    def forward_pass(self, batch, epoch, warmup=False, training=True): 
         graph_batch, answer_batch, triplet_batch, triplet_batch_idx, relevant_idx_batch, question_batch, q_embd_batch, id_batch = \
             batch["graph"], batch["y"], batch["triplets"], batch['triplet_batch_idx'], batch["relevant_idx"], batch["q"], batch["q_embd"], batch["id"]
         # if epoch == 0 and training:
@@ -161,8 +211,8 @@ class RLRE(nn.Module):
         #         }
 
         # batch_size = graph_batch.num_graphs
-        graph_batch, q_embd_batch, relevant_idx_batch = \
-            graph_batch.to(self.device), q_embd_batch.to(self.device), relevant_idx_batch.to(self.device)
+        graph_batch, q_embd_batch = \
+            graph_batch.to(self.device), q_embd_batch.to(self.device)
         # prob_batch, _, _, select_idx_batch, logits_batch = self.retriever(graph_batch, triplet_batch_idx, q_embd_batch, epoch=epoch) if not training \
             # else self.retriever(graph_batch, triplet_batch_idx, q_embd_batch, epoch, id_batch=id_batch, baseline=self.baseline)
         attn_logits_batch = self.retriever(graph_batch, q_embd_batch)
@@ -172,7 +222,9 @@ class RLRE(nn.Module):
             "select": [],
             "select_sub_ref": [],
             "ref_sub_select": [],
-            "select_cap_ref": []
+            "select_cap_ref": [],
+            "gt": relevant_idx_batch,
+            "id": id_batch
         }
         for i in range(len(id_batch)):
             attn_logit = attn_logits_batch[triplet_batch_idx == i]
@@ -183,21 +235,21 @@ class RLRE(nn.Module):
                 ref_idx = torch.tensor(self.baseline[id_batch[i]]["selection"], device=self.device)
                 if self.baseline_order_invariant:
                     select_idx = self.keep_order(ref_idx, select_idx)
-                indices_batch["select_sub_ref"].append(select_idx[~torch.isin(select_idx, ref_idx)])
-                indices_batch["ref_sub_select"].append(ref_idx[~torch.isin(ref_idx, select_idx)])
-                indices_batch["select_cap_ref"].append(ref_idx[torch.isin(ref_idx, select_idx)])
+                indices_batch["select_sub_ref"].append(select_idx[~torch.isin(select_idx, ref_idx)].cpu().tolist())
+                indices_batch["ref_sub_select"].append(ref_idx[~torch.isin(ref_idx, select_idx)].cpu().tolist())
+                indices_batch["select_cap_ref"].append(ref_idx[torch.isin(ref_idx, select_idx)].cpu().tolist())
             indices_batch["select"].append(select_idx)
 
         # TODO: 3. This part can be converted to single inference, not batch inference. Single inference: can be moved into the loop.    
         masked_triplets_batch, _ = self.mask_triplet(triplet_batch, indices_batch["select"])
         generation_batch = self.llms(question_batch, masked_triplets_batch)
-        reward_batch = self.cal_reward(generation_batch, question_batch, answer_batch, id_batch, indices_batch["select"], training=training)
+        reward_batch = self.cal_reward(generation_batch, question_batch, answer_batch, id_batch, indices_batch["select"], epoch, training=training)
         reward_loggings = {k:torch.mean(v).item() for k,v in reward_batch.items()}
         
         if not training:
             return 0, reward_loggings
 
-        loss = self.coeff1 * self.cal_loss_reinforce(prob_batch, indices_batch, reward_batch[self.metrics_name])
+        loss = self.coeff1 * self.cal_loss_reinforce_v2(prob_batch, indices_batch, reward_batch[self.metrics_name])
         reward_loggings["reinforce"] = loss.item()
         
         if self.regularize == "KL":
