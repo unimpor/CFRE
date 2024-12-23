@@ -19,21 +19,22 @@ sys.stdout.reconfigure(encoding='utf-8')
 
 def inference(model, test_loader, log_dir):
     model.eval()
-    model.set_eval()
-    result = []
+    result = {}
     with torch.no_grad():
         for _, batch in enumerate(test_loader):
             graph_batch, answer_batch, triplet_batch, triplet_batch_idx, relevant_idx_batch, question_batch, q_embd_batch, id_batch = \
             batch["graph"], batch["y"], batch["triplets"], batch['triplet_batch_idx'], batch["relevant_idx"], batch["q"], batch["q_embd"], batch["id"]
 
-            graph_batch, q_embd_batch, relevant_idx_batch = \
-                graph_batch.to(model.device), q_embd_batch.to(model.device), relevant_idx_batch.to(model.device)
+            graph_batch, q_embd_batch = graph_batch.to(model.device), q_embd_batch.to(model.device)
 
-            _, _, _, _, attn_logtis = model(graph_batch, triplet_batch_idx, q_embd_batch, 0)
-            result.append({
+            attn_logtis = model(graph_batch, q_embd_batch)
+            assert len(attn_logtis) == len(triplet_batch[0])
+            print(attn_logtis)
+            result[id_batch[0]] = {
                 "q": question_batch[0],
-                "logit": attn_logtis[0],
-            })
+                "logit": attn_logtis,
+                "triplets": triplet_batch[0]
+            }
     assert len(test_loader) == len(result)
     torch.save(result, opj(log_dir, "inference.pth"))    
     print("Done")
@@ -42,7 +43,6 @@ def inference(model, test_loader, log_dir):
 def train(num_epochs, patience, cfre, train_loader, val_loader, optimizer, log_dir, warmup=True, **kwargs):
     best_val_signal = -1.
     loggings = opj(log_dir, "logging.txt")
-    print("training!")
     for epoch in tqdm(range(num_epochs)):        
         cfre.train()
         cfre.baseline_cache = {}  # set empty to baseline cache at the start of every epoch.
@@ -78,15 +78,13 @@ def train(num_epochs, patience, cfre, train_loader, val_loader, optimizer, log_d
                 all_loss_dict_val[k] = v / len(val_loader)
             write_log(f"Epoch: {epoch}|{num_epochs}. Val Loss: {val_loss}" + str(all_loss_dict_val), loggings)
             # wandb.log({'Val Loss': val_loss})
-        # if epoch == 0:
-        #     torch.save(cfre.baseline, opj(log_dir, "baseline_org.pth"))
         
         if all_loss_dict_val[cfre.metrics_name] > best_val_signal:
             best_val_signal = all_loss_dict_val[cfre.metrics_name]
             # save fg retriever
             save_checkpoint(cfre.retriever, epoch, log_dir)
             best_epoch = epoch
-        
+        torch.save(cfre.baseline, opj(log_dir, "baseline.pth"))
         # reference update. Deprecated right now.
         # if (epoch + 1) % 4 == 0:
         #     update_num = cfre.update_baseline(train_loader)
@@ -102,7 +100,7 @@ def train(num_epochs, patience, cfre, train_loader, val_loader, optimizer, log_d
         
         if epoch - best_epoch >= patience:
             write_log(f'Early stop at epoch {epoch}', loggings)
-            save_checkpoint(cfre.retriever, epoch, log_dir, filename="final.pth")
+            # save_checkpoint(cfre.retriever, epoch, log_dir, filename="final.pth")
             break  
 
 
@@ -111,12 +109,15 @@ def main():
     parser.add_argument('--dataset', type=str, default="webqsp", help='dataset used, option: ')
     parser.add_argument('--device', type=int, default=0, help='cuda device id, -1 for cpu')
     parser.add_argument('--config_path', type=str, default="./config/config.yaml", help='path of config file')
+    parser.add_argument('--ckpt_path', type=str, default="datasets/webqsp/checkpoints/warmup.pth", help='path of config file')
     parser.add_argument('--proj_name', type=str, default=None)
     parser.add_argument('--mode', type=str, default="train")
     parser.add_argument('--retriever', type=str, default="PNA")
+
     parser.add_argument('--coeff1', type=float, default=0.1)
     parser.add_argument('--coeff2', type=float, default=0.1)
     parser.add_argument('--tau', type=float, default=1)
+    parser.add_argument('--algo', type=str, default="v2")
     parser.add_argument('--gumbel_strength', type=float, default=1)
     args = parser.parse_args()
     
@@ -124,7 +125,9 @@ def main():
     config['algorithm']['coeff1'] = args.coeff1
     config['algorithm']['coeff2'] = args.coeff2
     config['algorithm']['tau'] = args.tau
+    config['algorithm']['algo'] = args.algo
     config['algorithm']['gumbel_strength'] = args.gumbel_strength
+    
     train_config = config['train']
     llm_config = config['llms']
     warmup_config = train_config['warmup']
@@ -146,19 +149,47 @@ def main():
 
     set_seed(config['env']['seed'])
     train_set = RetrievalDataset(config=config["dataset"], split='train', )
+    reference = torch.load("/home/comp/cscxliu/derek/CFRE/datasets/webqsp/checkpoints/reference.pth")
+    refined_train_set = []
+    for data in train_set:
+        data["recall"] = reference[data["id"]]["recall"]
+        if reference[data["id"]]["recall"] < 1.0:
+            refined_train_set.append(data)
+    refined_train_set = sorted(refined_train_set, key=lambda x: x["recall"], reverse=False)
+
+    # def find_ranking(a, indices):
+    #     sorted_indices = torch.argsort(a, descending=True)
+    #     return [torch.where(sorted_indices == i)[0].item() for i in indices]
+    # for dat in refined_train_set:
+    #     print(dat["recall"], len(dat["relevant_idx"]), len(dat["triplets"]))    
+    # input(0)
+    # for dat in refined_train_set:
+    #     dat_id = dat["id"]
+    #     target_indices = dat["relevant_idx"]
+    #     prob = reference[dat_id]["logits"]
+    #     print(find_ranking(prob, target_indices), len(target_indices), reference[dat_id]["recall"])
+    #     input(0)
+
+
+    # print(len(refined_train_set))
     val_set = RetrievalDataset(config=config["dataset"], split='val', )
-    # test_set = RetrievalDataset(config=config["dataset"], split='test', )
+    test_set = RetrievalDataset(config=config["dataset"], split='test', )
     # print(len(train_set), train_config['batch_size'])
 
-    train_loader = DataLoader(train_set, batch_size=train_config['batch_size'], shuffle=True, collate_fn=collate_fn, drop_last=False)
-    val_loader = DataLoader(val_set, batch_size=train_config['batch_size'], collate_fn=collate_fn)
-    # test_loader = DataLoader(test_set, batch_size=1, collate_fn=collate_fn)
+    train_loader = DataLoader(refined_train_set, batch_size=train_config['batch_size'], shuffle=True, collate_fn=collate_fn, drop_last=False)
+    val_loader = DataLoader(val_set, batch_size=1, collate_fn=collate_fn)
+    test_loader = DataLoader(test_set, batch_size=1, collate_fn=collate_fn)
 
     ibtn = Retriever(config['retriever']).to(device)
     if args.proj_name != "warmup":
-        warmup_ckpt = torch.load("datasets/webqsp/checkpoints/warmup.pth", map_location=device)
+        warmup_ckpt = torch.load(args.ckpt_path, map_location=device)
         ibtn.load_state_dict(warmup_ckpt['model_state_dict'])
     
+    if args.mode == "inference":
+        ibtn.load_state_dict(torch.load(opj(log_dir, "best.pth"))["model_state_dict"])
+        inference(ibtn, test_loader, log_dir)
+        exit(0)
+
     llms = LLMs(llm_config)
     cfre = RLRE(retriever=ibtn, llm_model=llms, config=config['algorithm'])
 
@@ -168,15 +199,11 @@ def main():
     
     # Step 5. Training one epoch and batch
     # num_training_steps = args.num_epochs * len(train_loader)
-    if args.mode == "inference":
-        ibtn.load_state_dict(torch.load(opj(log_dir, "best.pth"))["model"])
-        inference(ibtn, test_loader, log_dir)
-
+    
+    if args.proj_name == "warmup":
+        train(warmup_config["num_epochs"], warmup_config["patience"], cfre, train_loader, val_loader, wp_optimizer, log_dir, warmup=True)
     else:
-        if args.proj_name == "warmup":
-            train(warmup_config["num_epochs"], warmup_config["patience"], cfre, train_loader, val_loader, wp_optimizer, log_dir, warmup=True)
-        else:
-            train(train_config["num_epochs"], train_config["patience"], cfre, train_loader, val_loader, optimizer, log_dir, warmup=False)
+        train(train_config["num_epochs"], train_config["patience"], cfre, train_loader, val_loader, optimizer, log_dir, warmup=False)
         # /home/comp/cscxliu/derek/CFRE/logging/webqsp/Llama-3.2-1B-Instruct/PNA/lora_gumbel
 
         # ibtn.load_state_dict(torch.load(opj(log_dir, "best.pth"))["model"])

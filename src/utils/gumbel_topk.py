@@ -4,13 +4,13 @@ from torch.overrides import has_torch_function_unary, handle_torch_function
 Tensor = torch.Tensor
 
 
-def gumbel_topk(logits: Tensor, K: int, tau: float = 2, mode: str = "st", eps: float = 1e-10, dim: int = -1, add_grumbel=True, eta=1.0, g=None, seed=0):
+def gumbel_topk(logits: Tensor, K: int, tau: float = 2, mode: str = "st", eps: float = 1e-10, dim: int = -1, add_grumbel=True, eta=1.0, g=None, seed=0, exclude=None):
     """
     Adapted this function from torch.nn.functional.gumbel_softmax.
     See https://pytorch.org/docs/stable/generated/torch.nn.functional.gumbel_softmax.html#torch.nn.functional.gumbel_softmax
     """
     if has_torch_function_unary(logits):
-        return handle_torch_function(gumbel_topk, (logits,), logits, k=K, tau=tau, mode=mode, eps=eps, dim=dim, add_grumbel=add_grumbel, eta=eta, g=g, seed=seed)
+        return handle_torch_function(gumbel_topk, (logits,), logits, k=K, tau=tau, mode=mode, eps=eps, dim=dim, add_grumbel=add_grumbel, eta=eta, g=g, seed=seed, exclude=exclude)
     
     # control the generation of gumbel noise
     if g:
@@ -24,23 +24,25 @@ def gumbel_topk(logits: Tensor, K: int, tau: float = 2, mode: str = "st", eps: f
             -torch.empty_like(logits, memory_format=torch.legacy_contiguous_format).exponential_().log()
         )
     # gumbels = (logits + eta * gumbels) / tau if add_grumbel else logits / tau
-    gumbels = (logits + eta * gumbels) / tau
+    if exclude:
+        gumbels[exclude] = 100. 
+    gumbels = logits + eta * gumbels
     # ~Gumbel(logits,tau)
-    y_soft, topk_indices = gumbels.softmax(dim), None
+    # gumbels, topk_indices = gumbels.softmax(dim), None
 
     if mode == "st":
         # Straight through.
-        # note topk_indices also sort y_soft from large to small
-        _, topk_indices = y_soft.topk(K, dim=dim, largest=True, sorted=True)
+        # note topk_indices also sort gumbels from large to small
+        _, topk_indices = gumbels.topk(K, dim=dim, largest=True, sorted=True)
         y_hard = torch.zeros_like(logits, memory_format=torch.legacy_contiguous_format).scatter_(dim, topk_indices, 1.0)
-        ret = y_hard - y_soft.detach() + y_soft
+        ret = y_hard - gumbels.detach() + gumbels
     elif mode == "hard":
-        _, topk_indices = y_soft.topk(K, dim=dim, largest=True, sorted=True)
+        _, topk_indices = gumbels.topk(K, dim=dim, largest=True, sorted=True)
         y_hard = torch.zeros_like(logits, memory_format=torch.legacy_contiguous_format).scatter_(dim, topk_indices, 1.0)
         ret = y_hard
-    elif mode == "soft":
-        # Reparametrization trick.
-        ret = y_soft
+    # elif mode == "soft":
+    #     # Reparametrization trick.
+    #     ret = gumbels
     else:
         raise NotImplementedError
     
