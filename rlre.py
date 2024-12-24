@@ -46,6 +46,7 @@ class RLRE(nn.Module):
             "v2": self.cal_loss_reinforce_v2,
             "v4": self.cal_loss_reinforce_v4,
             "v5": self.cal_loss_reinforce_v5,
+            "v6": self.cal_loss_reinforce_v6,
         }
         # deprecated.
         # self.add_gumbel = config["gumbel"]

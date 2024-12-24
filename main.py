@@ -43,12 +43,17 @@ def inference(model, test_loader, log_dir):
 def train(num_epochs, patience, cfre, train_loader, val_loader, optimizer, log_dir, warmup=True, **kwargs):
     best_val_signal = -1.
     loggings = opj(log_dir, "logging.txt")
-    for epoch in tqdm(range(num_epochs)):        
+    for epoch in tqdm(range(1, num_epochs)):        
         cfre.train()
         cfre.baseline_cache = {}  # set empty to baseline cache at the start of every epoch.
         cfre.update_num = 0
         epoch_loss, accum_loss, val_loss = 0., 0., 0.
         all_loss_dict, all_loss_dict_val = {}, {}
+        if epoch == 0:
+            for _, batch in enumerate(train_loader):
+                cfre.pre_processing(batch, epoch)
+            torch.save(cfre.baseline, opj(log_dir, "baseline.pth"))
+            continue
         for _, batch in enumerate(train_loader):
             optimizer.zero_grad()
             # loss, loss_dict = cfre.forward_pass(batch, epoch)
@@ -65,6 +70,7 @@ def train(num_epochs, patience, cfre, train_loader, val_loader, optimizer, log_d
             all_loss_dict[k] = v / len(train_loader)
         write_log(f"Epoch: {epoch}|{num_epochs}. Train Loss: {train_loss}" + str(all_loss_dict), loggings)
 
+
         cfre.eval()
         with torch.no_grad():
             for _, batch in enumerate(val_loader):
@@ -77,14 +83,16 @@ def train(num_epochs, patience, cfre, train_loader, val_loader, optimizer, log_d
             for k, v in all_loss_dict_val.items():
                 all_loss_dict_val[k] = v / len(val_loader)
             write_log(f"Epoch: {epoch}|{num_epochs}. Val Loss: {val_loss}" + str(all_loss_dict_val), loggings)
+            
             # wandb.log({'Val Loss': val_loss})
         
         if all_loss_dict_val[cfre.metrics_name] > best_val_signal:
             best_val_signal = all_loss_dict_val[cfre.metrics_name]
             # save fg retriever
+            torch.save(cfre.evaluation, opj(log_dir, "evaluation.pth"))
             save_checkpoint(cfre.retriever, epoch, log_dir)
             best_epoch = epoch
-        torch.save(cfre.baseline, opj(log_dir, "baseline.pth"))
+        
         # reference update. Deprecated right now.
         # if (epoch + 1) % 4 == 0:
         #     update_num = cfre.update_baseline(train_loader)
@@ -117,6 +125,7 @@ def main():
     parser.add_argument('--coeff1', type=float, default=0.1)
     parser.add_argument('--coeff2', type=float, default=0.1)
     parser.add_argument('--tau', type=float, default=1)
+    parser.add_argument('--ret_num', type=int, default=1)
     parser.add_argument('--algo', type=str, default="v2")
     parser.add_argument('--gumbel_strength', type=float, default=1)
     args = parser.parse_args()
@@ -125,6 +134,7 @@ def main():
     config['algorithm']['coeff1'] = args.coeff1
     config['algorithm']['coeff2'] = args.coeff2
     config['algorithm']['tau'] = args.tau
+    config['algorithm']['ret_num'] = args.ret_num
     config['algorithm']['algo'] = args.algo
     config['algorithm']['gumbel_strength'] = args.gumbel_strength
     
@@ -173,12 +183,15 @@ def main():
 
     # print(len(refined_train_set))
     val_set = RetrievalDataset(config=config["dataset"], split='val', )
-    test_set = RetrievalDataset(config=config["dataset"], split='test', )
+    
     # print(len(train_set), train_config['batch_size'])
 
     train_loader = DataLoader(refined_train_set, batch_size=train_config['batch_size'], shuffle=True, collate_fn=collate_fn, drop_last=False)
     val_loader = DataLoader(val_set, batch_size=1, collate_fn=collate_fn)
-    test_loader = DataLoader(test_set, batch_size=1, collate_fn=collate_fn)
+    
+    if args.mode == "inference":
+        test_set = RetrievalDataset(config=config["dataset"], split='test', )
+        test_loader = DataLoader(test_set, batch_size=1, collate_fn=collate_fn)
 
     ibtn = Retriever(config['retriever']).to(device)
     if args.proj_name != "warmup":
