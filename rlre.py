@@ -27,9 +27,11 @@ class RLRE(nn.Module):
         self.baseline = torch.load("logging/webqsp/Meta-Llama-3.1-8B-Instruct/DDE/reinforce_12.24-100/baseline.pth")
         self.evaluation = {}
         for k, v in self.baseline.items():
-            self.baseline[k]["exclude"] = [c.item() if torch.is_tensor(c) else c for c in self.baseline[k]["exclude"]]
+            self.baseline[k]["exclude"] = self.list_processing(self.baseline[k]["exclude"])
+            self.baseline[k]["include"] = self.list_processing(self.baseline[k]["include"])
             # self.baseline[k]["include"] = []
-            # self.baseline[k]["K"] = self.K
+            # self.baseline[k]["exclude"] = []
+            self.baseline[k]["K"] = self.K
         print(self.K)
         self.baseline_cache = {}
         self.set_moving_baseline = config["set_moving_baseline"]
@@ -47,6 +49,7 @@ class RLRE(nn.Module):
             "v4": self.cal_loss_reinforce_v4,
             "v5": self.cal_loss_reinforce_v5,
             "v6": self.cal_loss_reinforce_v6,
+            "v7": self.cal_loss_reinforce_v7,
         }
         # deprecated.
         # self.add_gumbel = config["gumbel"]
@@ -66,7 +69,6 @@ class RLRE(nn.Module):
     def cal_reward(self, g_batch, q_batch, a_batch, id_batch, idx_batch, epoch, training):
         """
         Given query and retrieved triplets, return the reward rerlative to the ``baseline''.
-        # TODO: We may need to change it to single inference version.
         """
         reward_batch = {
             "F1": torch.empty(0, dtype=torch.float),
@@ -276,10 +278,6 @@ class RLRE(nn.Module):
         prob_batch_pos, prob_batch_neg, prob_batch_pos_ref, prob_batch_neg_ref = [], [], [], []
         
         for i, dat_id in enumerate(indices_batch['id']):
-
-            # ref_sub_select_indices = indices_batch['ref_sub_select'][i]
-            # select_sub_ref_indices = indices_batch['select_sub_ref'][i]
-            # select_cap_ref_indices = indices_batch['select_cap_ref'][i]
             select_indices = indices_batch['select'][i]
             ref_indices = indices_batch['ref'][i]
             weak_indices = indices_batch['gt'][i]
@@ -287,25 +285,24 @@ class RLRE(nn.Module):
             p, p_ref = prob_batch[i], ref_prob_batch[i]
             
             if self.baseline[dat_id][f"d-{self.metrics_name}"] > 0:
-                exclude = [i for i in range(len(p)) if i not in self.combine_idx(self.baseline[dat_id]["include"], weak_indices)]
-                exclude = self.combine_idx(exclude, self.baseline[dat_id]["exclude"])
-
-                exclude = list(set(exclude) & set(select_indices))
-                
+                # exclude = [i for i in range(len(p)) if i not in self.combine_idx(self.baseline[dat_id]["include"], weak_indices)]
+                # exclude = self.combine_idx(exclude, self.baseline[dat_id]["exclude"])
                 include = self.sort_by_freq(self.baseline[dat_id]["include"], weak_indices)
-                include = [x for x in include if x not in select_indices]
-                
-                include = include[:min(len(include), len(exclude))]
+                include = [i for i in self.baseline[dat_id]["select"].tolist() if i not in include] + include               
                 # include = random.sample(include, min(len(include), len(exclude)))
 
             elif self.baseline[dat_id][f"d-{self.metrics_name}"] <= 0:
                 include = ref_indices
-                exclude = [i for i in range(len(p)) if i not in include]
             
-            if self.baseline[dat_id][f"rf-{self.metrics_name}"] + self.baseline[dat_id][f"d-{self.metrics_name}"] == 1:
-                include = self.baseline[dat_id]["selection"]
-                exclude = [i for i in range(len(p)) if i not in include]
+            # if self.baseline[dat_id][f"rf-{self.metrics_name}"] + self.baseline[dat_id][f"d-{self.metrics_name}"] == 1:
+            #     include = self.baseline[dat_id]["select"].tolist()
+                
+            exclude = [i for i in range(len(p)) if i not in include]
+            exclude = self.combine_idx(exclude, self.baseline[dat_id]["exclude"])
+            exclude = list(set(exclude) & set(select_indices))
 
+            include = [x for x in include if x not in select_indices]
+            include = random.sample(include, min(len(include), len(exclude)))
             # if self.baseline[dat_id][f"d-{self.metrics_name}"] == 0:
             #     include = select_cap_ref_indices
             # if self.baseline[dat_id][f"rf-{self.metrics_name}"] + self.baseline[dat_id][f"d-{self.metrics_name}"] == 1:
@@ -329,6 +326,55 @@ class RLRE(nn.Module):
 
         rl_loss = self.coeff1 * ((prob_batch_pos-prob_batch_pos_ref)-(prob_batch_neg-prob_batch_neg_ref))
         # rl_loss = self.coeff1 * (prob_batch_pos-prob_batch_neg)
+        rl_loss = -F.logsigmoid(rl_loss).mean()
+        return rl_loss
+
+    def cal_loss_reinforce_v6(self, prob_batch, indices_batch):
+        ref_prob_batch = [(self.baseline[d]["logits"] / self.tau).softmax(dim=0).to(self.device) for d in indices_batch['id']]
+
+        prob_batch_pos, prob_batch_neg, prob_batch_pos_ref, prob_batch_neg_ref = [], [], [], []
+        
+        for i, dat_id in enumerate(indices_batch['id']):
+            select_indices = indices_batch['select'][i]
+            ref_indices = indices_batch['ref'][i]
+            weak_indices = indices_batch['gt'][i]
+
+            p, p_ref = prob_batch[i], ref_prob_batch[i]
+            
+            if self.baseline[dat_id][f"d-{self.metrics_name}"] > 0:
+                # exclude = [i for i in range(len(p)) if i not in self.combine_idx(self.baseline[dat_id]["include"], weak_indices)]
+                # exclude = self.combine_idx(exclude, self.baseline[dat_id]["exclude"])
+                include = self.sort_by_freq(self.baseline[dat_id]["include"], weak_indices)
+                include = [i for i in self.baseline[dat_id]["select"].tolist() if i not in include] + include               
+                # include = random.sample(include, min(len(include), len(exclude)))
+
+            elif self.baseline[dat_id][f"d-{self.metrics_name}"] <= 0:
+                include = ref_indices
+            
+            # if self.baseline[dat_id][f"rf-{self.metrics_name}"] + self.baseline[dat_id][f"d-{self.metrics_name}"] == 1:
+            #     include = self.baseline[dat_id]["select"].tolist()
+
+            _, select_indices = self.sampling(p, training=False, K=len(include))
+            select_indices = select_indices.tolist()
+
+            exclude = [i for i in range(len(p)) if i not in include]
+            exclude = self.combine_idx(exclude, self.baseline[dat_id]["exclude"])
+            exclude = list(set(exclude) & set(select_indices))
+
+            include = [x for x in include if x not in select_indices]
+
+            prob_batch_pos.append(self.log_prob_(p[include]))
+            prob_batch_pos_ref.append(self.log_prob_(p_ref[include]))
+            prob_batch_neg.append(self.log_prob_(p[exclude]))
+            prob_batch_neg_ref.append(self.log_prob_(p_ref[exclude]))
+        
+        prob_batch_pos = torch.cat(prob_batch_pos)
+        prob_batch_neg = torch.cat(prob_batch_neg)
+        prob_batch_pos_ref = torch.cat(prob_batch_pos_ref)
+        prob_batch_neg_ref = torch.cat(prob_batch_neg_ref)
+
+        rl_loss = self.coeff1 * ((prob_batch_pos-prob_batch_pos_ref)-(prob_batch_neg-prob_batch_neg_ref))
+        # rl_loss = prob_batch_pos - prob_batch_neg
         rl_loss = -F.logsigmoid(rl_loss).mean()
         return rl_loss
 
@@ -362,7 +408,7 @@ class RLRE(nn.Module):
 
             # TODO: exclude args set to []
             for j in range(20):
-                _, select_idx = self.sampling(attn_logit, seed=10*epoch+j, training=True, include=relevant_idx_batch[i], exclude=list(set(self.baseline[d]["exclude"])), K=self.baseline[d]["K"])  # get the index of chosen triplets
+                _, select_idx = self.sampling(attn_logit, seed=10*epoch+j, training=True, include=relevant_idx_batch[i], exclude=[], K=self.baseline[d]["K"])  # get the index of chosen triplets
                 if self.baseline_order_invariant:
                     select_idx = self.keep_order_v2(ref_idx, select_idx)
                 
@@ -380,17 +426,18 @@ class RLRE(nn.Module):
                 if f1 == 1:
                     break
                 if f1 > f1_ref:
-                    self.baseline[d]["include"] += select_sub_ref
+                    self.baseline[d]["include"] += select_idx
                 
                 if f1 == 0:
-                    self.baseline[d]["exclude"] = self.combine_idx(self.baseline[d]["exclude"], select_idx)
+                    # self.baseline[d]["exclude"] = self.combine_idx(self.baseline[d]["exclude"], select_idx)
+                    self.baseline[d]["exclude"] += select_idx
                 if f1_ref == 0:
-                    self.baseline[d]["exclude"] = self.combine_idx(self.baseline[d]["exclude"], ref_idx)
+                    self.baseline[d]["exclude"] += ref_idx
                 
                 if set(ga) <= set(ga_ref):
-                    self.baseline[d]["exclude"] = self.combine_idx(self.baseline[d]["exclude"], select_sub_ref)
+                    self.baseline[d]["exclude"] += select_sub_ref
                 if set(ga_ref) <= set(ga):
-                    self.baseline[d]["exclude"] = self.combine_idx(self.baseline[d]["exclude"], ref_sub_select)
+                    self.baseline[d]["exclude"] += ref_sub_select
                 # if f1 - f1_ref > 0:
                 #     self.baseline[d]["exclude"] = self.combine_idx(self.baseline[d]["exclude"], ref_sub_select)
                 # elif f1 - f1_ref == 0:
@@ -582,20 +629,16 @@ class RLRE(nn.Module):
         return torch.tensor(adjusted_b, device=self.device)
 
     def keep_order_v2(self, b, a):
-        overlap_indices_in_b = [i for i, x in enumerate(b) if x in a]  # b 中重叠元素的索引
-        overlap_values = [x for x in b if x in a]  # 重叠的元素
+        overlap_indices_in_b = [i for i, x in enumerate(b) if x in a]
+        overlap_values = [x for x in b if x in a]
 
-        # 构建一个新的 tensor，初始值为占位符（例如 -1）
         a_prime = torch.full_like(a, fill_value=-1, device=self.device)
 
-        # 将重叠部分按照 b 的索引放入 a'
         for i, val in zip(overlap_indices_in_b, overlap_values):
             a_prime[i] = val
 
-        # 找到 a 中不与 b 重叠的部分
         non_overlap_values = [x for x in a if x not in b]
 
-        # 填充 a' 中的空位（值为 -1 的部分）为非重叠部分
         non_overlap_idx = 0
         for i in range(len(a_prime)):
             if a_prime[i] == -1:
@@ -614,3 +657,7 @@ class RLRE(nn.Module):
             result[k] = 10 * v if k not in ref else 10 * v + 1
         result = sorted(result.items(), key=lambda x: x[1], reverse=True)
         return [d[0] for d in result]
+    
+    @staticmethod
+    def list_processing(l):
+        return [c.item() if torch.is_tensor(c) else c for c in l]
