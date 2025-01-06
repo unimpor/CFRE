@@ -66,3 +66,16 @@ class Retriever(nn.Module):
         ], dim=1)
         
         return self.pred(h_triple).squeeze()
+    
+    def trainable_params(self):
+        trainable_params = 0
+        all_param = 0
+
+        for _, param in self.named_parameters():
+            num_params = param.numel()
+
+            all_param += num_params
+            if param.requires_grad:
+                trainable_params += num_params
+
+        return trainable_params, all_param

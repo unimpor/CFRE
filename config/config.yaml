@@ -19,7 +19,7 @@ llms:
   max_seq_len_to_capture: 16384 
   max_tokens: 4000 
   seed: 0 
-  temperature: 0 
+  temperature: 0
   frequency_penalty: 0.14
   prompt_mode: sys_icl_dc_reverse
   

@@ -13,7 +13,7 @@ def save_checkpoint(model, cur_epoch, log_dir, filename=f"best.pth"):
     state_dict = model.state_dict()
 
     save_obj = {
-        "model": state_dict,
+        "model_state_dict": state_dict,
         "epoch": cur_epoch,
     }
     path = opj(log_dir, filename)

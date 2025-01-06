@@ -49,7 +49,6 @@ class RLRE(nn.Module):
             "v4": self.cal_loss_reinforce_v4,
             "v5": self.cal_loss_reinforce_v5,
             "v6": self.cal_loss_reinforce_v6,
-            "v7": self.cal_loss_reinforce_v7,
         }
         # deprecated.
         # self.add_gumbel = config["gumbel"]
@@ -66,7 +65,7 @@ class RLRE(nn.Module):
         g = self.llms([q], masked_triplets_batch)
         return self.reward_metrics.calc_r(g[0],a,q)
 
-    def cal_reward(self, g_batch, q_batch, a_batch, id_batch, idx_batch, epoch, training):
+    def cal_reward(self, g_batch, q_batch, a_batch, id_batch, epoch, training):
         """
         Given query and retrieved triplets, return the reward rerlative to the ``baseline''.
         """
@@ -75,7 +74,7 @@ class RLRE(nn.Module):
             "precision": torch.empty(0, dtype=torch.float),
             "recall": torch.empty(0, dtype=torch.float),
         }
-        for g,q,a,d,idx in zip(g_batch, q_batch, a_batch, id_batch, idx_batch):
+        for g,q,a,d in zip(g_batch, q_batch, a_batch, id_batch):
             (f1_abs, prec_abs, recall_abs), _ = self.reward_metrics.calc_r(g,a,q)
             # only the training needs relative to baselines.
             # if self.set_moving_baseline and training:
@@ -106,8 +105,10 @@ class RLRE(nn.Module):
                 #     self.baseline[d]["selection"] = idx.cpu()
             else:
                 f1, prec, recall = f1_abs, prec_abs, recall_abs
-                self.evaluation[d] = {"F1": f1, "precision": prec, "recall": recall}
-            
+                print(f1, prec, recall)
+                self.evaluation[d]["F1"] = f1
+                self.evaluation[d]["precision"] = prec
+                self.evaluation[d]["recall"] = recall            
             reward_batch["F1"] = torch.cat((reward_batch["F1"], torch.tensor([f1])))
             reward_batch["precision"] = torch.cat((reward_batch["precision"], torch.tensor([prec])))
             reward_batch["recall"] = torch.cat((reward_batch["recall"], torch.tensor([recall])))
@@ -470,7 +471,7 @@ class RLRE(nn.Module):
             attn_logit = attn_logits_batch[triplet_batch_idx == i]
             attn_prob = (attn_logit / self.tau).softmax(dim=0)
             prob_batch.append(attn_prob)
-            
+
             if training:
                 # select_idx = torch.tensor(self.baseline[id_batch[i]]["select"], device=self.device)
                 _, select_idx = self.sampling(attn_logit, training=False)
@@ -498,7 +499,7 @@ class RLRE(nn.Module):
         if not training:
             masked_triplets_batch, _ = self.mask_triplet(triplet_batch, indices_batch["select"])
             generation_batch = self.llms(question_batch, masked_triplets_batch)
-            reward_batch = self.cal_reward(generation_batch, question_batch, answer_batch, id_batch, indices_batch["select"], epoch, training=training)
+            reward_batch = self.cal_reward(generation_batch, question_batch, answer_batch, id_batch, epoch, training=training)
             reward_loggings = {k:torch.mean(v).item() for k,v in reward_batch.items()}
             return 0, reward_loggings
         
@@ -524,6 +525,20 @@ class RLRE(nn.Module):
         #             "selection": topk_indices.detach().cpu().clone()
         #         }
         return loss, reward_loggings
+
+    def sampling_v2(self, tensor, training=False, K=6):
+        indices = torch.arange(len(tensor), device=tensor.device)
+    
+        positive_indices = indices[tensor > 0]
+        positive_values = tensor[tensor > 0]
+
+        if len(positive_indices) > K:
+            sorted_indices = torch.argsort(positive_values, descending=True)
+            positive_indices = positive_indices[sorted_indices]
+        else:
+            sorted_indices = torch.argsort(tensor, descending=True)
+            positive_indices = sorted_indices[:K]
+        return None, positive_indices
 
     def sampling(self, att_log_logit, seed=None, training=True, **kwargs):
         """
@@ -661,3 +676,26 @@ class RLRE(nn.Module):
     @staticmethod
     def list_processing(l):
         return [c.item() if torch.is_tensor(c) else c for c in l]
+
+    def case_study(self, id_batch, question_batch, answer_batch, triplet_batch, select_idx, gt_idx):
+        
+        def print_log(content):
+            content = content.replace("\n", "") if isinstance(content, str) else ", ".join(map(str, content))
+            save_path = "fig/case_study.txt"
+            with open(save_path, "a", encoding="utf-8") as f:
+                f.write(content + "\n")
+        print_log(id_batch[0])
+        print_log(question_batch[0])
+        print_log(answer_batch[0])
+        
+        print_log("select cases:")
+        print_log(select_idx[0])
+        masked_triplets_batch, _ = self.mask_triplet(triplet_batch, select_idx)
+        generation_batch = self.llms(question_batch, masked_triplets_batch)
+        print_log(generation_batch[0])
+
+        print_log("weak signal cases:")
+        print_log(gt_idx[0])
+        masked_triplets_batch, _ = self.mask_triplet(triplet_batch, gt_idx)
+        generation_batch = self.llms(question_batch, masked_triplets_batch)
+        print_log(generation_batch[0])
