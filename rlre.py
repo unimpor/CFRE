@@ -498,7 +498,7 @@ class RLRE(nn.Module):
                 
         if not training:
             masked_triplets_batch, _ = self.mask_triplet(triplet_batch, indices_batch["select"])
-            generation_batch = self.llms(question_batch, masked_triplets_batch)
+            generation_batch = self.llms(question_batch, answer_batch, masked_triplets_batch)
             reward_batch = self.cal_reward(generation_batch, question_batch, answer_batch, id_batch, epoch, training=training)
             reward_loggings = {k:torch.mean(v).item() for k,v in reward_batch.items()}
             return 0, reward_loggings
@@ -538,7 +538,7 @@ class RLRE(nn.Module):
         else:
             sorted_indices = torch.argsort(tensor, descending=True)
             positive_indices = sorted_indices[:K]
-        return None, positive_indices
+        return None, positive_indices.tolist()
 
     def sampling(self, att_log_logit, seed=None, training=True, **kwargs):
         """

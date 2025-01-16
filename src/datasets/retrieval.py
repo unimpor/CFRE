@@ -104,8 +104,13 @@ class RetrievalDataset:
 
     def _extract_paths_(
         self,
-        sample
+        sample,
+        func_type="shortest"
     ):
+        assert func_type in ["shortest", "all"]
+        func_series = {"shortest": self._shortest_path,
+                       "all": self._all_path}
+
         nx_g = self._get_nx_g(
             sample['h_id_list'],
             sample['r_id_list'],
@@ -116,7 +121,7 @@ class RetrievalDataset:
         path_list_ = []
         for q_entity_id in sample['q_entity_id_list']:
             for a_entity_id in sample['a_entity_id_list']:
-                paths_q_a = self._shortest_path(nx_g, q_entity_id, a_entity_id)
+                paths_q_a = func_series[func_type](nx_g, q_entity_id, a_entity_id)
                 if len(paths_q_a) > 0:
                     path_list_.extend(paths_q_a)
 
@@ -165,6 +170,26 @@ class RetrievalDataset:
             nx_g.add_edge(h_i, t_i, triple_id=i, relation_id=r_i)
 
         return nx_g
+
+    def _all_path(
+        self,
+        nx_g,
+        q_entity_id,
+        a_entity_id
+    ):
+        try:
+            forward_paths = list(nx.all_simple_paths(nx_g, q_entity_id, a_entity_id, cutoff=2))
+        except:
+            forward_paths = []
+        
+        # try:
+        #     backward_paths = list(nx.all_simple_paths(nx_g, a_entity_id, q_entity_id))
+        # except:
+        #     backward_paths = []
+        
+        # full_paths = forward_paths + backward_paths
+        # return full_paths
+        return forward_paths
 
     def _shortest_path(
         self,

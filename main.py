@@ -70,7 +70,6 @@ def train(num_epochs, patience, cfre, train_loader, val_loader, optimizer, log_d
             all_loss_dict[k] = v / len(train_loader)
         write_log(f"Epoch: {epoch}|{num_epochs}. Train Loss: {train_loss}" + str(all_loss_dict), loggings)
 
-
         cfre.eval()
         with torch.no_grad():
             for _, batch in enumerate(val_loader):
