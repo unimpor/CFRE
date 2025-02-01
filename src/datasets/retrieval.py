@@ -13,13 +13,16 @@ class RetrievalDataset:
     load retrieval results and post-processing
     """
 
-    def __init__(self, config, split):
+    def __init__(self, config, split, **kwargs):
         self.split = split
         self.config = config
         self.root = config['root']
         self.data_name = config['name']
         self.post_filter = False  # deprecated feature
         self.filtering_id = None
+        self.version = kwargs.get("version", None)  # tmp arg  
+        if self.version in ["path", "triplet", "relation"]:
+            self.tmp_data = torch.load(f"datasets/{self.data_name}/checkpoints/reward_alloc.pth")[self.version]    
         
         raw_data = self._load_data(opj(self.root, self.data_name, "processed", f"{self.split}.pkl"))
         # embs = self._load_emb()
@@ -43,6 +46,8 @@ class RetrievalDataset:
                     continue
                 if self.config['skip_no_path'] and (sample_scored['max_path_length'] in [None, 0]):
                     continue
+                if len(sample_scored["a_entity_in_graph"]) == 0:
+                    continue
             sample_embd = embs[sample_id] # 'entity_embs', 'q_emb', 'relation_embs'
             
             all_entities = sample["text_entity_list"] + sample["non_text_entity_list"]
@@ -61,14 +66,21 @@ class RetrievalDataset:
             edge_index = torch.stack([torch.tensor(h_id_list), 
                                       torch.tensor(t_id_list)], axis=0)
             edge_attr = sample_embd['relation_embs'][r_id_list]
-
+            
+            shortest_path_idx = [all_triplets.index(item[:3]) for item in sample_scored['target_relevant_triples']]
+            relevant_idx = shortest_path_idx
+            if self.version in ["path", "triplet", "relation"]:
+                relevant_idx = self.tmp_data[sample_id]
+            
             processed_sample = {
                 "id": sample_id,
                 "q": sample["question"],
                 "q_embd": sample_embd['q_emb'],
                 "a_entity": [all_entities[idx] for idx in sample["a_entity_id_list"]],
                 "triplets": all_triplets,
-                "relevant_idx": [all_triplets.index(item[:3]) for item in sample_scored['target_relevant_triples']],
+                "relevant_idx": relevant_idx,
+                "shortest_path_idx": shortest_path_idx,
+                "shortest_paths_plus_1": sample_scored.get("relevant_paths_1", []),
                 "y": sample_scored['a_entity_in_graph'] if self.split != "test" else sample["a_entity"],
                 "graph": Data(x=x, edge_attr=edge_attr, edge_index=edge_index.long(), topic_signal=topic_entity_one_hot.float())
             }
@@ -92,8 +104,8 @@ class RetrievalDataset:
         emb_path = opj(self.root, self.data_name, "processed", "emb", self.split)
         for file in os.listdir(emb_path):
             if file.endswith('.pth'):
-                dict_file = torch.load(opj(emb_path, file))
-                full_dict.update(dict_file)
+            dict_file = torch.load(opj(emb_path, file))
+            full_dict.update(dict_file)
         return full_dict
 
     def __len__(self):
@@ -175,21 +187,22 @@ class RetrievalDataset:
         self,
         nx_g,
         q_entity_id,
-        a_entity_id
+        a_entity_id,
+        cutoff=None
     ):
         try:
-            forward_paths = list(nx.all_simple_paths(nx_g, q_entity_id, a_entity_id, cutoff=2))
+            forward_paths = list(nx.all_simple_paths(nx_g, q_entity_id, a_entity_id, cutoff=cutoff))
         except:
             forward_paths = []
         
-        # try:
-        #     backward_paths = list(nx.all_simple_paths(nx_g, a_entity_id, q_entity_id))
-        # except:
-        #     backward_paths = []
+        try:
+            backward_paths = list(nx.all_simple_paths(nx_g, a_entity_id, q_entity_id, cutoff=cutoff))
+        except:
+            backward_paths = []
         
-        # full_paths = forward_paths + backward_paths
-        # return full_paths
-        return forward_paths
+        full_paths = forward_paths + backward_paths
+        return full_paths
+
 
     def _shortest_path(
         self,

@@ -198,7 +198,7 @@ class LLMs_Ret_Relations(LLMs):
         user_query = "\n\n".join([triplet_or_path_prompt, question_prompt])
         response = self.llm_inf(messages=self.pack_prompt(user_query))
 
-        print_log(user_query + "\n" + response, save_path=f"fig/webqsp_label_{self.level}.txt")
+        print_log(user_query + "\n" + response, save_path=f"fig/{self.data_name}_iter2_label_{self.level}.txt")
 
         identified = get_pred(response)
         try:
