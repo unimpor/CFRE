@@ -35,7 +35,23 @@ def adjust_learning_rate(param_group, LR, epoch, args):
     param_group["lr"] = lr
     return lr
 
+def print_log(content, save_path = "fig/cwq_pure_weak_.txt"):
+    # print(content)
+    # replace("\n", "")
+    content = content if isinstance(content, str) else "\n".join(map(str, content))
+    
+    with open(save_path, "a", encoding="utf-8") as f:
+        f.write(content + "\n")
 
+
+def remove_duplicates(input_list):
+    seen = set()
+    result = []
+    for item in input_list:
+        if item not in seen:
+            result.append(item)
+            seen.add(item)
+    return result
 # def collate_fn(data):
 #     sample = data[0]
 #
@@ -75,12 +91,12 @@ def collate_fn(batch_org):
     batch["q_embd"] = torch.cat([batch["q_embd"][i].expand(triplets_num_per_graph[i], -1) for i in range(batch_size)])    
     batch['triplet_batch_idx'] = torch.cat([torch.tensor([i]).expand(triplets_num_per_graph[i]) for i in range(batch_size)])
 
-    all_rel_idx = []
-    current_node_count = 0
-    for rel_idx, num_tr in zip(batch['relevant_idx'], triplets_num_per_graph):
-        all_rel_idx.append(torch.tensor(rel_idx) + current_node_count)
-        current_node_count += num_tr
-    batch['relevant_idx'] = torch.cat(all_rel_idx)
+    # all_rel_idx = []
+    # current_node_count = 0
+    # for rel_idx, num_tr in zip(batch['relevant_idx'], triplets_num_per_graph):
+    #     all_rel_idx.append(torch.tensor(rel_idx) + current_node_count)
+    #     current_node_count += num_tr
+    # batch['relevant_idx'] = torch.cat(all_rel_idx)
     # combined_list = sum(batch['triplets'], [])
     # a = [combined_list[idx.item()] for idx in batch['relevant_idx']]
     # b = sum([[d['triplets'][idx] for idx in d['relevant_idx']] for d in batch_org], [])

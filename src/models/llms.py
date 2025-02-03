@@ -1,3 +1,4 @@
+import random
 import re
 import time
 from vllm import LLM, SamplingParams
@@ -9,6 +10,7 @@ from src.utils.prompts import *
 from src.utils import print_log
 
 API_KEY = "215e0f164f9f445ea2aaa64db2e1c135"
+# API_KEY="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"
 MAX_RETRIES = 5
 
 class LLMs(nn.Module):
@@ -19,9 +21,11 @@ class LLMs(nn.Module):
         super().__init__()
         self.prompt_mode = config["prompt_mode"]
         self.model_name = config["llm_model_name_or_path"]
+        self.data_name = config["data_name"]
+        self.cot_mode = config["cot"]
         # prompt config
         self.system_prompt = SYS_PROMPT
-        self.icl_prompt = (ICL_USER_PROMPT, ICL_ASS_PROMPT)
+        self.icl_prompt = [(ICL_USER_PROMPT, ICL_ASS_PROMPT)]
         if "gpt" not in self.model_name:
             client = LLM(model=self.model_name, 
                          tensor_parallel_size=config["tensor_parallel_size"], 
@@ -37,6 +41,7 @@ class LLMs(nn.Module):
                 base_url="https://api.aimlapi.com/v1/",
                 api_key=API_KEY,  
             )
+            print(config['seed'], config['temperature'])
             self.llm = partial(client.chat.completions.create, 
                                model=self.model_name, 
                                seed=config["seed"], 
@@ -63,17 +68,21 @@ class LLMs(nn.Module):
             conversation.append({"role": "system", "content": self.system_prompt})
 
         if 'icl' in self.prompt_mode:
-            conversation.append({"role": "user", "content": self.icl_prompt[0]})
-            conversation.append({"role": "assistant", "content": self.icl_prompt[1]})
+            for item in self.icl_prompt:
+                conversation.append({"role": "user", "content": item[0]})
+                conversation.append({"role": "assistant", "content": item[1]})
 
         if 'sys' in self.prompt_mode:
             conversation.append({"role": "user", "content": user_query})
+        # if self.cot_mode:
+        #     conversation.append({"role": "user", "content": COT_PROMPT})
         return conversation
 
     def llm_inf(self, messages):
         if "gpt" not in self.model_name:
-            output = self.llm(messages=messages)
-            return output[0].outputs[0].text
+            # batch version for llama
+            outputs = self.llm(messages=messages)
+            return [output.outputs[0].text for output in outputs]
         else:
             # inference with retry
             retries, max_retries = 0, MAX_RETRIES
@@ -81,16 +90,26 @@ class LLMs(nn.Module):
                 try:
                     output = self.llm(messages=messages)
                     return output.choices[0].message.content
+                except openai.BadRequestError as e:
+                    print(e)
+                    break
                 except openai.RateLimitError as e:
                     wait_time = (2 ** retries) * 5  # Exponential backoff
                     print(f"Rate limit error encountered. Retrying in {wait_time} seconds...")
                     time.sleep(wait_time)
                     retries += 1
+                except:
+                    break
             # raise Exception("Max retries exceeded. Please check your rate limits or try again later.")
             print("Max retries exceeded. Please check your rate limits or try again later.")
             return "ans: Not available"
 
     def forward(self, query_batch, ans_batch, triplet_or_path_batch):
+        
+        if "gpt" not in self.model_name:
+            conversation_batch = [self.generate_prompt(q,a,t) for q, a, t in zip(query_batch, ans_batch, triplet_or_path_batch)]
+            return self.llm_inf(conversation_batch)
+        
         outputs = [self.llm_inf(messages=self.generate_prompt(q,a,t)) for q, a, t in zip(query_batch, ans_batch, triplet_or_path_batch)]
         # if "gpt" not in self.model_name:
         #     generations = [output[0].outputs[0].text for output in outputs]
@@ -98,52 +117,70 @@ class LLMs(nn.Module):
         #     generations = [output.choices[0].message.content for output in outputs]
         return outputs
 
-    def bforward(self, query_batch, ans_batch, triplet_batch):
-        # batch generation
-        conversation_batch = [self.generate_prompt(q,a,t) for q, a, t in zip(query_batch, ans_batch, triplet_batch)]
-        outputs = self.llm(messages=conversation_batch)
-        generations = [output.outputs[0].text for output in outputs]
-        return generations
+    # def bforward(self, query_batch, ans_batch, triplet_or_path_batch):
+    #     # batch generation, only for llama
+    #     conversation_batch = [self.generate_prompt(q,a,t) for q, a, t in zip(query_batch, ans_batch, triplet_or_path_batch)]
+    #     outputs = self.llm(messages=conversation_batch)
+    #     generations = [output.outputs[0].text for output in outputs]
+    #     return generations
 
 class LLMs_Ret_Paths(LLMs):
     def __init__(self, config):
         super().__init__(config)
         self.system_prompt = SYS_PROMPT_PATH
-        self.icl_prompt = (ICL_USER_PROMPT_PATH, ICL_ASS_PROMPT_PATH)
+        self.icl_prompt = [(ICL_USER_PROMPT_PATH, ICL_ASS_PROMPT_PATH)]
+        # TODO: Webqsp dataset
+        # if self.data_name == "webqsp":
+        #     self.icl_prompt = (ICL_USER_PROMPT_PATH_W, ICL_ASS_PROMPT_PATH_W)
         self.level = "path"
     
-    def identify_(self, query, answer, triplets_or_paths, all_triplets):
+    def oracle_detection(self, id_batch, query_batch, answer_batch, path_batch, **kwargs):
         """
         Note: not a batch-wise version.
         """
-        formatted_paths = []
-        for i, path in enumerate(triplets_or_paths):
-            formatted_path = f"Path{i}.\n"
-            # Join each triple as a string and separate them by commas
-            formatted_path += ', '.join([str(triplet) for triplet in path])
-            formatted_paths.append(formatted_path)
+        messages_batch = []
+        identified_batch, sign_batch = [], []
+        for query, answer, triplets_or_paths in zip(query_batch, answer_batch, path_batch):
+            random.shuffle(triplets_or_paths)
+            logging = kwargs.get("logging", None)
+            formatted_paths = []
+            for i, path in enumerate(triplets_or_paths):
+                formatted_path = f"Path{i}.\n"
+                # Join each triple as a string and separate them by commas
+                formatted_path += ', '.join([str(triplet) for triplet in path])
+                formatted_paths.append(formatted_path)
 
-        triplet_or_path_prompt = "Paths:\n" + "\n".join(formatted_paths)
+            triplet_or_path_prompt = "Paths:\n" + "\n".join(formatted_paths)
+            
+            question_prompt = "Question:\n" + query
+            answer_prompt = "Answer(s):\n" + ", ".join(answer)
+            if question_prompt[-1] != '?':
+                question_prompt += '?'
+
+            user_query = "\n\n".join([triplet_or_path_prompt, question_prompt, answer_prompt])
+            messages_batch.append(self.pack_prompt(user_query))
         
-        question_prompt = "Question:\n" + query
-        answer_prompt = "Answer(s):\n" + ", ".join(answer)
-        if question_prompt[-1] != '?':
-            question_prompt += '?'
+        if "gpt" not in self.model_name:
+            response_batch = self.llm_inf(messages=messages_batch)
+        else:
+            response_batch = [self.llm_inf(messages=messages) for messages in messages_batch]
 
-        user_query = "\n\n".join([triplet_or_path_prompt, question_prompt, answer_prompt])
-        response = self.llm_inf(messages=self.pack_prompt(user_query))
-
-        print_log(user_query + "\n" + response, save_path=f"fig/webqsp_label_{self.level}.txt")
-        identified = get_pred(response)
-        try:
-            identified = [triplets_or_paths[i] for i in identified]
-        except IndexError as e:
-            identified = []
-
-        selected_triplets = [triplet for path in identified for triplet in path]
-        selected_triplets = [all_triplets.index(triplet) for triplet in selected_triplets]
+        for d, response, triplets_or_paths in zip(id_batch, response_batch, path_batch):
+            print_log(d, logging)
+            print_log(response, logging)
+            print_log('\n', logging)
+            identified, sign = get_pred(response), get_sign(response)
+            try:
+                identified = [triplets_or_paths[i] for i in identified]
+            except IndexError as e:
+                identified = []
+            identified_batch.append(identified)
+            sign_batch.append(sign)
         
-        return selected_triplets
+        return identified_batch, sign_batch
+        # selected_triplets = [triplet for path in identified for triplet in path]
+        # selected_triplets = [all_triplets.index(triplet) for triplet in selected_triplets]
+        # return selected_triplets
 
         
 class LLMs_Ret_Triplets(LLMs):
@@ -153,7 +190,7 @@ class LLMs_Ret_Triplets(LLMs):
         self.icl_prompt = (ICL_USER_PROMPT_TRI, ICL_ASS_PROMPT_TRI)
         self.level = "triplet"
     
-    def identify_(self, query, answer, triplets_or_paths, all_triplets):
+    def oracle_detection(self, query, answer, triplets_or_paths, all_triplets):
         all_triplets_ = path2triple(triplets_or_paths)
         formatted_triplets = [f"Triplet{i}.\n" + str(triplet) for i, triplet in enumerate(all_triplets_)]
         
@@ -168,13 +205,13 @@ class LLMs_Ret_Triplets(LLMs):
 
         print_log(user_query + "\n" + response, save_path=f"fig/webqsp_label_{self.level}.txt")
         identified = get_pred(response)
+        print(identified)
         try:
             identified = [all_triplets_[i] for i in identified]
         except IndexError as e:
             identified = []
-
+        print(identified)
         selected_triplets = [all_triplets.index(triplet) for triplet in identified]
-        
         return selected_triplets
 
 
@@ -183,10 +220,13 @@ class LLMs_Ret_Relations(LLMs):
         super().__init__(config)
         self.system_prompt = SYS_PROMPT_R
         self.icl_prompt = (ICL_USER_PROMPT_R, ICL_ASS_PROMPT_R)
+        if self.data_name == "webqsp":
+            self.icl_prompt = (ICL_USER_PROMPT_R_W, ICL_ASS_PROMPT_R_W)
         self.level = "relation"
     
-    def identify_(self, query, answer, triplets_or_paths, all_triplets):
-        all_relations = path2relation(triplets_or_paths)
+    def oracle_detection(self, query, answer, triplets_or_paths, all_triplets):
+        # all_relations = path2relation(triplets_or_paths)
+        all_relations = triplets_or_paths
         formatted_relations = [f"Relation{i}.\n" + r for i, r in enumerate(all_relations)]
         
         triplet_or_path_prompt = "Relations:\n" + "\n".join(formatted_relations)
@@ -198,7 +238,7 @@ class LLMs_Ret_Relations(LLMs):
         user_query = "\n\n".join([triplet_or_path_prompt, question_prompt])
         response = self.llm_inf(messages=self.pack_prompt(user_query))
 
-        print_log(user_query + "\n" + response, save_path=f"fig/{self.data_name}_iter2_label_{self.level}.txt")
+        print_log(user_query + "\n" + response, save_path=f"fig/{self.data_name}_iter2_label_{self.level}_.txt")
 
         identified = get_pred(response)
         try:
@@ -206,10 +246,10 @@ class LLMs_Ret_Relations(LLMs):
         except IndexError as e:
             identified = []
 
-        selected_triplets = [triplet for triplet in path2triple(triplets_or_paths) if triplet[1] in identified]
-        selected_triplets = [all_triplets.index(triplet) for triplet in selected_triplets]
-        
-        return selected_triplets      
+        # selected_triplets = [triplet for triplet in path2triple(triplets_or_paths) if triplet[1] in identified]
+        # selected_triplets = [all_triplets.index(triplet) for triplet in selected_triplets]
+        # return selected_triplets 
+        return identified     
 
 
 def remove_duplicates(input_list):
@@ -221,6 +261,11 @@ def remove_duplicates(input_list):
             seen.add(item)
     return result
 
+def get_sign(prediction):
+    try:
+        return prediction.split("\n")[-1].split(": ")[-1]
+    except:
+        return "CONTINUE"
 
 def get_pred(prediction):
     ans_list = []
