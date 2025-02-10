@@ -8,7 +8,8 @@ from itertools import chain
 from torch_geometric.data.data import Data
 import networkx as nx
 import matplotlib.pyplot as plt
-from src.utils import print_log
+from src.utils import print_log, remove_duplicates
+from copy import deepcopy
 
 
 class RetrievalDataset:
@@ -16,39 +17,58 @@ class RetrievalDataset:
     load retrieval results and post-processing
     """
 
-    def __init__(self, config, split, **kwargs):
+    def __init__(self, config, split, opath=None, **kwargs):
         self.split = split
         self.config = config
         self.root = config['root']
         self.data_name = config['name']
-        self.post_filter = False
+        self.post_filter = True  # filter bad samples.
+        self.oracle_path = opath
         self.version = kwargs.get("version", None)  # tmp arg  
         if self.version in ["path", "triplet", "relation"]:
             self.tmp_data = torch.load(f"datasets/{self.data_name}/checkpoints/reward_alloc.pth")[self.version]    
         
         raw_data = self._load_data(opj(self.root, self.data_name, "processed", f"{self.split}.pkl"))
         # embs = self._load_emb()
-        scored_data = self._load_data(opj(self.root, self.data_name, "processed", f"{self.data_name}_241028_{self.split}.pth"))
+        # scored_data = self._load_data(opj(self.root, self.data_name, "processed", f"{self.data_name}_241028_{self.split}.pth"))
         
-        self.processed_data = self.process(raw_data, scored_data)
+        self.processed_data = self.process(raw_data, )
 
     @property
     def processed_file_names(self):
         filename = f"completed_{self.split}_{self.post_filter}.pth" if self.post_filter else f"completed_{self.split}.pth"
         return opj(self.root, self.data_name, "processed", filename)
 
-    def process(self, raw_data, scored_data):
+    def process(self, raw_data, ):
         embs = self._load_emb()
         # only for the need of training
-        shortest_paths_cache = torch.load("datasets/cwq/processed/shortest_path_only_forward.pth")
+        # oracle_paths_cache = torch.load("logging_detection/cwq/gpt-4o-mini/DDE/path-detection-first-half/evaluation_full.pth")
+        if self.split == "train":
+            shortest_paths_cache = torch.load("datasets/cwq/processed/shortest_path.pth")
+            oracle_paths_cache = torch.load(self.oracle_path)
+        # only for the need of test
+        # TODO: filtering id
+        filtering_id = torch.load("datasets/cwq/processed/test_filtering_bad_ids.pth") + torch.load("datasets/cwq/processed/test_filtering_bad_ids2.pth")
         processed_data = []
         for sample in raw_data:
             sample_id = sample['id']
-            shortest_paths =  shortest_paths_cache.get(sample_id, [])
-            if self.split == "train" and not shortest_paths:
+            sample_embd = embs.get(sample_id, None)
+            if not sample_embd:
                 continue
-            sample_embd = embs[sample_id] # 'entity_embs', 'q_emb', 'relation_embs'
+            if self.split == "train":
+                # if not dat or dat["sign"] != "STOP":
+                dat =  oracle_paths_cache.get(sample_id, None)
+                if not dat:
+                    continue                
             
+            if self.split == "test" and self.post_filter and sample_id in filtering_id:
+                continue
+            # sample_embd = embs[sample_id] # 'entity_embs', 'q_emb', 'relation_embs'
+            # oracle_paths = dat["selected"] if self.split == "train" else []
+            shortest_paths = shortest_paths_cache[sample_id] if self.split == "train" else []
+            # assert len(shortest_paths) == len(dat)
+            oracle_paths = [shortest_paths[idx] for idx, sign in enumerate(dat) if sign in [0,1]] if self.split == "train" else []
+
             all_entities = sample["text_entity_list"] + sample["non_text_entity_list"]
             all_relations = sample["relation_list"]
             h_id_list, r_id_list, t_id_list = sample["h_id_list"], sample["r_id_list"], sample["t_id_list"]
@@ -67,19 +87,20 @@ class RetrievalDataset:
             edge_attr = sample_embd['relation_embs'][r_id_list]
             
             # shortest_path_idx = [all_triplets.index(item[:3]) for item in sample_scored['target_relevant_triples']]
-            shortest_path_idx = [all_triplets.index(item[:3]) for path in shortest_paths for item in path]
-            relevant_idx = shortest_path_idx
-            # TODO: relevant idx implementation
-            # if self.version in ["path", "triplet", "relation"]:
-            #     relevant_idx = self.tmp_data[sample_id]
+            shortest_path_idx = [all_triplets.index(item) for path in shortest_paths for item in path]
+            shortest_path_idx = remove_duplicates(shortest_path_idx)
+            
+            oracle_path_idx = [all_triplets.index(item) for path in oracle_paths for item in path]
+            oracle_path_idx = remove_duplicates(oracle_path_idx)
             
             processed_sample = {
                 "id": sample_id,
                 "q": sample["question"],
                 "q_embd": sample_embd['q_emb'],
                 "a_entity": [all_entities[idx] for idx in sample["a_entity_id_list"]],
+                "q_entity": [all_entities[idx] for idx in sample["q_entity_id_list"]],
                 "triplets": all_triplets,
-                "relevant_idx": relevant_idx,
+                "relevant_idx": oracle_path_idx,
                 "shortest_path_idx": shortest_path_idx,
                 # "shortest_paths_plus_1": sample_scored.get("relevant_paths_1", []),
                 # "y": sample_scored['a_entity_in_graph'] if self.split != "test" else sample["a_entity"],
@@ -209,7 +230,6 @@ class RetrievalDataset:
         full_paths = forward_paths + backward_paths
         return full_paths
 
-
     def _shortest_path(
         self,
         nx_g,
@@ -221,29 +241,24 @@ class RetrievalDataset:
         except:
             forward_paths = []
         
-        return forward_paths
-        # try:
-        #     backward_paths = list(nx.all_shortest_paths(nx_g, a_entity_id, q_entity_id))
-        # except:
-        #     backward_paths = []
+        # return forward_paths
+        try:
+            backward_paths = list(nx.all_shortest_paths(nx_g, a_entity_id, q_entity_id))
+        except:
+            backward_paths = []
         
-        # if forward_paths:
-        #     return forward_paths
-        # else:
-        #     return backward_paths
+        full_paths = forward_paths + backward_paths
+        if (len(forward_paths) == 0) or (len(backward_paths) == 0):
+            return full_paths
+        # full_paths = forward_paths if len(forward_paths) != 0 else backward_paths
         
-        # full_paths = forward_paths + backward_paths
-        # if (len(forward_paths) == 0) or (len(backward_paths) == 0):
-        #     return full_paths
-        # # full_paths = forward_paths if len(forward_paths) != 0 else backward_paths
+        min_path_len = min([len(path) for path in full_paths])
+        refined_paths = []
+        for path in full_paths:
+            if len(path) == min_path_len:
+                refined_paths.append(path)
         
-        # min_path_len = min([len(path) for path in full_paths])
-        # refined_paths = []
-        # for path in full_paths:
-        #     if len(path) == min_path_len:
-        #         refined_paths.append(path)
-        
-        # return refined_paths
+        return refined_paths
 
     def viz_subgraph(self, triples, sample):
         sample_id = sample["id"]
@@ -282,20 +297,24 @@ class RetrievalDatasetWithoutEmb(RetrievalDataset):
     def __init__(self, config, split):
         super().__init__(config, split)
 
-    def process(self, raw_data, scored_data):
+    def process(self, raw_data):
         print("begin")
-        # results = torch.load("logging/cwq/gpt-4o-mini/DDE/warmup_training_Jan19_downs_path/evaluation_K100_resume.pth")
-        processed_data = {}
-        path_cache = {}
+        processed_data = []
+        # only for the need of training
+        shortest_paths_cache = torch.load("datasets/cwq/processed/shortest_path.pth")
         for sample in raw_data:
             sample_id = sample['id']
-            sample_scored = scored_data.get(sample_id, None)
-            # if self.split != "test":
-            if not sample_scored:
+            # if sample_id not in ["WebQTest-2008_8c6b952c6bd963f0ece4e401c9eb731a", 
+            #                      "WebQTrn-2518_1ef15e22372df70baf01b72850deb14d", 
+            #                      "WebQTest-415_b6ad66a3f1f515d0688c346e16d202e6",
+            #                      "WebQTest-341_0f5ccea2d11b712eda64ebf2f6aeb1ee"]:
+            #     continue
+            shortest_paths = shortest_paths_cache.get(sample_id, [])
+            if not shortest_paths or max(len(path) for path in shortest_paths) == 0:
                 continue
-            if self.config['skip_no_path'] and (sample_scored['max_path_length'] in [None, 0]):
-                continue
-
+            # if len(shortest_paths) > 40:
+            #     print("wait for next time ...")
+            #     continue
             # Since embeddings are omitted, replace embedding-dependent logic
             all_entities = sample["text_entity_list"] + sample["non_text_entity_list"]
             all_relations = sample["relation_list"]
@@ -303,19 +322,13 @@ class RetrievalDatasetWithoutEmb(RetrievalDataset):
             all_triplets = [(all_entities[h], all_relations[r], all_entities[t]) for (h, r, t) in zip(h_id_list, r_id_list, t_id_list)]
 
             # Create placeholder tensors for graph features (since embs are omitted)
-            # x = torch.zeros(len(all_entities), 1)  # Dummy node features
-            # edge_index = torch.stack([torch.tensor(h_id_list), torch.tensor(t_id_list)], axis=0)
-            # edge_attr = torch.zeros(len(r_id_list), 1)  # Dummy edge features
+            x = torch.zeros(len(all_entities), 1)  # Dummy node features
+            edge_index = torch.stack([torch.tensor(h_id_list), torch.tensor(t_id_list)], axis=0)
+            edge_attr = torch.zeros(len(r_id_list), 1)  # Dummy edge features
 
-            # relevant_idx_loaded = [all_triplets.index(item[:3]) for item in sample_scored['target_relevant_triples']]
-            
-            # save_path = "fig/cwq_info.txt"
-            # print_log(sample_id, save_path)
-            # print_log(sample["question"], save_path)
-            # print_log("question entities", save_path)
-            # print_log([all_entities[i] for i in sample["q_entity_id_list"]], save_path)
-            # print_log("answer entities", save_path)
-            # print_log([all_entities[i] for i in sample["a_entity_id_list"]], save_path)
+            # shortest_path_idx = [all_triplets.index(item[:3]) for path in shortest_paths for item in path]
+            # relevant_idx = shortest_path_idx
+
             def paths_stat(paths):
                 paths_len = len(paths)
                 all_triplets_selected = set(list(chain(*paths)))
@@ -336,10 +349,10 @@ class RetrievalDatasetWithoutEmb(RetrievalDataset):
             #     writer = csv.writer(file)
             #     writer.writerow([sample_id, len(all_triplets), len(relevant_idx_loaded), pl0, tl0, rl0, pl1, tl1, rl1, pl2, tl2, rl2, pl3, tl3, rl3])
             
-            relevant_paths = self._extract_paths_(sample=sample)
-            relevant_paths = [[all_triplets[i] for i in path] for path in relevant_paths]
+            # relevant_paths = self._extract_paths_(sample=sample)
+            # relevant_paths = [[all_triplets[i] for i in path] for path in relevant_paths]
             
-            path_cache[sample_id] = relevant_paths
+            # shortest_paths_cache[sample_id] = relevant_paths
             # scored_data[sample_id]["relevant_paths_1"] = relevant_paths_1
             # print("Done" + " " + sample_id)
             # for idx, path in enumerate(relevant_idx_):
@@ -359,21 +372,45 @@ class RetrievalDatasetWithoutEmb(RetrievalDataset):
             #     "select": results[sample_id]["select"],
             #     "all_triplets": all_triplets
             # }
-            # processed_sample = {
-            #     "id": sample_id,
-            #     "q": sample["question"],
-            #     "q_embd": torch.zeros(1, 1),  # No embeddings for the question
-            #     "a_entity": [all_entities[idx] for idx in sample["a_entity_id_list"]],
-            #     "triplets": all_triplets,
-            #     "relevant_idx": relevant_idx_loaded,
-            #     "relevant_paths": sample_scored["relevant_paths"],
-            #     "relevant_paths_1": sample_scored["relevant_paths_1"],
-            #     "y": sample_scored['a_entity_in_graph'] if self.split != "test" else sample["a_entity"],
-            #     "graph": Data(x=x, edge_attr=edge_attr, edge_index=edge_index.long())
-            # }
 
-            # processed_data.append(processed_sample)
+            processed_sample = {
+                "id": sample_id,
+                "q": sample["question"],
+                "q_embd": torch.zeros(1, 1),  # No embeddings for the question
+                "a_entity": [all_entities[idx] for idx in sample["a_entity_id_list"]],
+                "triplets": all_triplets,
+                "relevant_paths": shortest_paths,
+                "y": sample["a_entity"],
+                "graph": Data(x=x, edge_attr=edge_attr, edge_index=edge_index.long())
+            }
+            processed_data.append(processed_sample)
         # torch.save(scored_data, opj(self.root, self.data_name, "processed", f"{self.data_name}_241028_{self.split}_path1.pth"))
-        torch.save(path_cache, opj(self.root, self.data_name, "processed", f"shortest_path_only_forward.pth"))
-        input("success")
-        return processed_data
+        # torch.save(shortest_paths_cache, opj(self.root, self.data_name, "processed", f"shortest_path.pth"))
+        # input("success")
+        return split_samples(processed_data)
+
+
+
+def split_samples(processed_samples):
+    new_samples = []
+    
+    for processed_sample in processed_samples:
+        relevant_paths = processed_sample["relevant_paths"]
+        
+        if len(relevant_paths) > 10:
+            num_chunks = (len(relevant_paths) + 9) // 10
+            
+            for i in range(num_chunks):
+                chunk_paths = relevant_paths[i * 10: (i + 1) * 10]
+                new_sample = deepcopy(processed_sample)
+                
+                new_sample["id"] = f"{processed_sample['id']}+{i}"
+                new_sample["relevant_paths"] = chunk_paths
+                
+                new_samples.append(new_sample)
+        else:
+            new_samples.append(processed_sample)
+    
+    return new_samples
+
+

@@ -2,6 +2,108 @@
 Define all prompts used in this project.
 """
 
+ICL_USER_PROMPT_2 = """Triplets:
+(Barbados, location.location.containedby, Caribbean)
+(Netherlands Antilles, location.location.containedby, Caribbean)
+(Cura�ao, location.country.official_language, Dutch Language)
+(Anguilla, location.location.containedby, Caribbean)
+(English Language, language.human_language.countries_spoken_in, Bahamas)
+(Spanish Language, language.human_language.countries_spoken_in, Barbados)
+(Barbados, location.country.languages_spoken, English Language)
+(Barbados, location.location.containedby, British West Indies)
+(Sint Maarten, location.country.official_language, Dutch Language)
+(Caribbean, location.location.contains, British Virgin Islands)
+(Netherlands Antilles, location.country.official_language, Dutch Language)
+(Flemish language, language.human_language.main_country, Belgium)
+
+
+Question:
+Of the countries that are in the Caribbean, which has the Dutch Language as an official language?
+
+
+Hints:
+Caribbean
+Dutch Language
+"""
+
+
+ICL_ASS_PROMPT_2 = """To find the countries in the Caribbean that have Dutch Language as an official language, taking into account the hints, we will look for triplets that link countries to the location 'Caribbean' and also link countries to 'Dutch Language' as their official language.
+
+From the triplets, we can identify the following:
+
+1. Countries in the Caribbean:
+   - Barbados (mentioned in the triplet: 'Barbados', 'location.location.containedby', 'Caribbean')
+   - Netherlands Antilles (mentioned in the triplet: 'Netherlands Antilles', 'location.location.containedby', 'Caribbean')
+   - Anguilla (mentioned in the triplet: 'Anguilla', 'location.location.containedby', 'Caribbean')
+   - British Virgin Islands (mentioned in the triplet: 'Caribbean', 'location.location.contains', 'British Virgin Islands')
+
+2. Countries with Dutch Language as an official language:
+   - Cura�ao (mentioned in the triplet: 'Cura�ao', 'location.country.official_language', 'Dutch Language')
+   - Sint Maarten (mentioned in the triplet: 'Sint Maarten', 'location.country.official_language', 'Dutch Language')
+   - Netherlands Antilles (mentioned in the triplet: 'Netherlands Antilles', 'location.country.official_language', 'Dutch Language')
+
+3. **Construct the sets**:
+   - Caribbean countries: Barbados, Netherlands Antilles, Anguilla, British Virgin Islands
+   - Countries with Dutch Language as an official language: Cura�ao, Sint Maarten, Netherlands Antilles
+
+4. **Strict set intersection**: When finding the intersection of the two sets, we only include entities that appear in both sets. Do **not** include entities that only appear in one set.
+   - Netherlands Antilles
+
+In this process, we **strictly use** the entities mentioned in the triplets, and **ensure that only entities that appear in both sets are included in the intersection**.
+   
+Therefore, the answer is:
+
+ans: Netherlands Antilles
+"""
+
+
+ICL_USER_PROMPT_3 = """Triplets:
+(Phoenix Islands, location.administrative_division.country, Kiribati)
+(m.04c6sl7, location.imports_and_exports.exported_to, Kiribati)
+(Kiribati, location.statistical_region.places_imported_from, m.04c6sl7)
+(m.04c6sj8, location.imports_and_exports.imported_from, Kiribati)
+(Asia, base.locations.continents.countries_within, Japan)
+(Japan, location.statistical_region.places_exported_to, m.0493792)
+(Japan, location.statistical_region.places_exported_to, m.04c6sl7)
+('m.0493792', 'location.imports_and_exports.exported_to', 'United States of America')
+
+
+Question:
+What country does Japan export to that contains the Phoenix Islands?
+
+
+Hints:
+Japan
+Phoenix Islands
+"""
+
+
+ICL_ASS_PROMPT_3 = """To determine what country Japan exports to that contains the Phoenix Islands, we will focus on the hints provided: "Japan" and "Phoenix Islands." 
+
+From the triplets, we can see that:
+
+1. The Phoenix Islands are contained within Kiribati, as indicated by the triplet:
+   - ('Phoenix Islands', 'location.administrative_division.country', 'Kiribati')
+
+2. We need to find the exports from Japan. The relevant triplets that mention Japan's exports include:
+   - ('Japan', 'location.statistical_region.places_exported_to', 'm.04c6sl7')
+   - ('Japan', 'location.statistical_region.places_exported_to', 'm.0493792')
+
+3. Then, we need to identify what these abstract identifiers (like 'm.048prwp') correspond to. The triplet:
+   - ('m.04c6sl7', 'location.imports_and_exports.exported_to', 'Kiribati')
+   - ('m.0493792', 'location.imports_and_exports.exported_to', 'United States of America')
+
+4. Among these, the triplet:
+   - ('m.04c6sl7', 'location.imports_and_exports.exported_to', 'Kiribati')
+   indicates that Japan exports to Kiribati.
+
+Since the Phoenix Islands are part of Kiribati, we conclude that Japan exports to Kiribati, which contains the Phoenix Islands.
+
+Therefore, the answer is:
+
+ans: Kiribati
+"""
+
 
 ICL_USER_PROMPT = """Triplets:
 (Lou Seal,sports.mascot.team,San Francisco Giants)
@@ -20,24 +122,15 @@ ICL_USER_PROMPT = """Triplets:
 (AT&T Park,location.location.events,2012 World Series)
 (m.011zsc4_,organization.leadership.organization,San Francisco Giants)
 (San Francisco Giants,sports.sports_team.previously_known_as,New York Giants)
-(AT&T Park,location.location.events,2010 World Series)
-(Crazy Crab,sports.mascot.team,San Francisco Giants)
-(New York Giants,baseball.baseball_team.league,National League)
-(San Francisco Giants,sports.sports_team.colors,Black)
-(San Francisco Giants,sports.sports_team.previously_known_as,New York Gothams)
-(m.0k079qm,base.schemastaging.team_training_ground_relationship.team,San Francisco Giants)
-(m.0k079ry,base.schemastaging.team_training_ground_relationship.team,San Francisco Giants)
-(2010 World Series,time.event.locations,AT&T Park)
-(San Francisco Giants,time.participant.event,2012 Major League Baseball season)
-(San Francisco Giants,baseball.baseball_team.league,National League)
-(m.0crtd80,sports.sports_league_participation.league,National League West)
-(San Francisco Giants,sports.sports_team.location,San Francisco)
-(San Francisco Giants,sports.sports_team.sport,Baseball)
-(m.05n6dtn,baseball.baseball_team_stats.team,San Francisco Giants)
 
 
 Question:
-What year did the team with mascot named Lou Seal win the World Series?"""
+What year did the team with mascot named Lou Seal win the World Series?
+
+
+Hints:
+Lou Seal
+"""
 
 
 ICL_ASS_PROMPT = """To find the year the team with mascot named Lou Seal won the World Series, we need to find the team with mascot named Lou Seal and then find the year they won the World Series.
@@ -56,9 +149,49 @@ ans: 2014 (2014 World Series)
 ans: 2012 (2012 World Series)
 ans: 2010 (2010 World Series)"""
 
+# SYS_PROMPT = (
+#     "Based on the triplets retrieved from a knowledge graph, please answer the question."
+#     ' Please return formatted answers as a list, each prefixed with "ans:".'
+# )
+
+# SYS_PROMPT = (
+#     " Based solely on the provided triplets from the knowledge graph, please answer the question."
+#     " Do not rely on any common knowledge. Only use the information explicitly stated in the triplets."
+#     " Your response should strictly adhere to the relationships, entities, and properties mentioned in the triplets. If any entity or relationship is not present in the triplets, do not infer or assume it."
+#     " Please return your answer as a list, with each valid response prefixed with 'ans:'."
+#     # For example, if the question asks about a country's official language, check for a triplet like ('Country', 'location.country.official_language', 'Language') and use it to form your answer.
+# )
 SYS_PROMPT = (
-    "Based on the triplets retrieved from a knowledge graph, please answer the question."
-    ' Please return formatted answers as a list, each prefixed with "ans:".'
+"Based solely on the provided triplets, please answer the question. Pay special attention to the following:"
+" 1. You will be provided with hints containing a list of entities which are extracted from the question. When answering the question, prioritize considering triplets that explicitly mention these entities. This will help you focus on relevant context for generating the most accurate response."
+" 2. If the triplet you identify links the hint entity to an abstract identifier like 'm.0hpny13', simply look for other triplets involving this abstract entity, as it often acts as a bridge connecting the question entities to the answer." 
+" 3. When answering the question, only use the information provided in the triplets. Do not rely on your inherent knowledge. Only the entities, relationships, and facts in the triplets are allowed to be used in your reasoning process."
+" 4. Return your answer(s) as a list, with each prefixed with 'ans:'."
+
+
+# For example:
+# - If a triplet says 'Entity A' is located in 'Entity B', you can only infer the relationship between 'Entity A' and 'Entity B' based on that triplet.
+# - If a triplet says 'Entity C' speaks 'Language X', you can only consider that relationship without assuming other knowledge about 'Entity C' or 'Language X'.
+
+# In other words, **do not make any assumptions** or bring in information outside of the provided triplets. Only the entities, relationships, and facts in the triplets are allowed to be used in your reasoning process.
+
+
+
+# " For example, for the triplet ('Russell', 'people.person.education', 'm.0hpny13'), you can find ('m.0hpny13', 'education.education.institution', 'Georgia Tech') to connect Russell to Georgia Tech."
+
+# " Here are the steps to follow:"
+# " 1. Identify all entities that are mentioned in the question, such as countries or languages."
+# " 2. Find the relevant triplets from the given triplets that correspond to these entities as required in the question."
+# # 3. For the part of the question that refers to "Caribbean", search for triplets that include the location "Caribbean" (e.g., ('Country', 'location.location.containedby', 'Caribbean')).
+# # 4. For the part of the question that refers to "Dutch Language", search for triplets that link countries to "Dutch Language" as their official language (e.g., ('Country', 'location.country.official_language', 'Dutch Language')).
+# " 3. After identifying relevant triplets for all elements, combine the information to get the final answer."
+# " 4. Please return your answer(s) as a list, with each prefixed with 'ans:'."
+
+# " For example, if the question asks about countries in the Caribbean that have Dutch as an official language, you should:\n"
+
+# "1. For the part of the question that refers to 'Caribbean', search for triplets that link countries to the location 'Caribbean', e.g., ('Country', 'location.location.containedby', 'Caribbean').\n"
+# "2. For the part of the question that refers to 'Dutch Language', search for triplets that link countries to 'Dutch Language' as their official language, e.g., ('Country', 'location.country.official_language', 'Dutch Language').\n"
+# "3. After identifying the relevant triplets for both concepts ('Caribbean' and 'Dutch Language'), find the intersection of the two sets of countries mentioned in these triplets."
 )
 
 
@@ -68,7 +201,7 @@ COT_PROMPT = (
     ' Otherwise, if there is no sufficient information to answer the question, return "ans: not available".'
 )
 
-SYS_PROMPT_PATH = (
+SYS_PROMPT_PATH_old = (
     # oracal subset detection
     # TODO: whether or not ignore or preserve paths with repeating meaning, 
     "You are provided with a question, its answer(s), and a set of reasoning paths."
@@ -83,6 +216,48 @@ SYS_PROMPT_PATH = (
     " If they do, append 'sign: STOP' to your answer. If any entity or relationship is missing, append 'sign: CONTINUE' to your answer."
 )
 
+SYS_PROMPT_PATH_old1 = (
+   # description
+   "You are provided with a question, its answer(s), and several reasoning paths. Each path represents a logical sequence of steps that leads toward an answer."
+   # task
+   " Your task is to evaluate each path individually and determine whether it should be selected based on the following criteria:"
+   # notice
+   " 1. A path should be selected if it connects some (but not necessarily all) of the entities and relationships mentioned in the question."
+   " 2. Even if a single evaluated path does not cover all the entities and relationships, it should still be selected if it covers part of them."
+   # " However, it should only be selected if it logically connects some (not necessarily all) key entities and relationships mentioned in the question and meaningfully contributes to answering (or partially answering) the question."
+   # " However, if the reasoning is completely misaligned with the question or does not provide any meaningful information to answer it, the path should not be selected, even if it points to the correct answer."
+   " 3. However, if the reasoning does not cover any entities or relationships, the path should not be selected, even if it points to the correct answer."   
+   # return
+   " 4. After evaluation, return the selected paths, each prefixed with 'ans:', such as 'ans: Path 0\nans: Path 1'. "
+   # final assessment 
+   # TODO: consider using.
+   # " Finally, assess whether the selected paths sufficiently cover all necessary entities and relationships to answer the question." 
+   # " If all entities and relationships are covered, append 'sign: STOP' to your answer. If any key entity or relationship is still missing, append 'sign: CONTINUE' to your answer."
+)
+
+SYS_PROMPT_PATH = (
+
+   "You are provided with a question, its answer(s), and several reasoning paths. Each path represents a logical sequence of steps that leads to an answer."
+
+   " Your task is to evaluate each path individually and assign it a score based on its relevance to answering the question, according to the following criteria:"
+   
+   "\nScore = 1: If the path covers all the key entities and relationships mentioned in the question and provides sufficient information to fully answer the question."
+   
+   "\nScore = 0: If the path covers some of the key entities or relationships from the question and provides useful information that can help justify or validate the final answer, even if it doesn't fully answer the question."
+   
+   "\nScore = -1: If the path does not cover any key entities or relationships, or does not contribute any meaningful information to answering the question."
+
+   "\nFor example, for the question 'What country speaks Arabic in the Central Time Zone?' and its answer 'Canada', the path ('Canada', 'location.location.time_zones', 'Central Time Zone') should be marked as 0,"
+   " because this path cannot fully answer the question, but it captures the key entity 'Central Time Zone' and helps validate the answer by confirming the Canada is in the Central Time Zone."
+   
+   " For the question 'Which college includes Newt Gincrich as an alumni?' and its answer 'Tulane University', the path ('Tulane University', 'common.topic.notable_types', 'College/University') should be marked as -1,"
+   " because this path does not provide any meaningful information for the question."
+
+   "\nFor each path, return its score in the format 'Path X: score' (e.g., 'Path 0: 1')."
+   # TODO: brief version
+   # "\nProvide a brief explanation for each path, justifying the assigned score."
+   )
+
 # deprecated.
 # SYS_PROMPT_PATH_STRICT = (
 #     "You are provided with a question, the answer(s) to the question, and a set of reasoning paths which lead to the answer(s)."
@@ -92,15 +267,31 @@ SYS_PROMPT_PATH = (
 #     " Please return the number of the identified relevant paths as a list, each prefixed with 'ans:', or return an empty list if no paths are relevant."
 # )
 
-ICL_USER_PROMPT_PATH = """Paths:
-Path 0.
+ICL_USER_PROMPT_PATH_0 = """Paths:
+Path0.
+('Tupac Shakur', 'film.actor.film', 'm.0jz0c4'), ('m.0jz0c4', 'film.performance.film', "Gridlock'd")
+
+
+Question:
+What movie with film character named Mr. Woodson did Tupac star in?
+
+
+Answer(s):
+Gridlock'd
+"""
+
+ICL_ASS_PROMPT_PATH_0_brief = """Path 0: 0
+"""
+
+ICL_ASS_PROMPT_PATH_0 = """Path 0: 0
+This path connects 'Tupac Shakur' to 'Gridlock'd', but it does not mention 'Mr. Woodson'. Therefore, it does not fully answer the question but provides useful information which helps validate the answer by confirming Tupac's involvement in Gridlock'd.
+"""
+
+ICL_USER_PROMPT_PATH_1 = """Paths:
+Path0.
 ('Super Bowl', 'time.recurring_event.instances', 'Super Bowl XLVII')
-Path 1.
-('Super Bowl', 'time.recurring_event.instances', 'Super Bowl XXXV')
-Path 2.
+Path1.
 ('The Baltimore Fight Song', 'sports.fight_song.sports_team', 'Baltimore Ravens'), ('Baltimore Ravens', 'sports.sports_team.championships', 'Super Bowl XLVII')
-Path 3.
-('The Baltimore Fight Song', 'sports.fight_song.sports_team', 'Baltimore Ravens'), ('Baltimore Ravens', 'sports.sports_team.championships', 'Super Bowl XXXV')
 
 
 Question:
@@ -111,52 +302,62 @@ Answers:
 Super Bowl XLVII, Super Bowl XXXV
 """
 
-ICL_ASS_PROMPT_PATH = """To answer the question about the years the team associated with "The Baltimore Fight Song" won the Super Bowl, we need to identify paths that connect the fight song to the Baltimore Ravens and then show the Super Bowls they won.
+ICL_ASS_PROMPT_PATH_1 = """Path 0: -1
+This path mentions 'Super Bowl' and 'Super Bowl XLVII', but it does not provide any information about the team associated with the 'Baltimore Fight Song' or the year they won the Super Bowl. Therefore, it does not contribute meaningfully to answering the question.
 
-The relevant paths are:
-
-- **Path 2**: This path connects "The Baltimore Fight Song" to the Baltimore Ravens and indicates that they won Super Bowl XLVII.
-- **Path 3**: This path also connects "The Baltimore Fight Song" to the Baltimore Ravens and indicates that they won Super Bowl XXXV.
-
-Paths 0 and 1 only mention the Super Bowls but do not connect them to the Baltimore Ravens or the fight song.
-
-Thus, the identified paths that lead to the correct answer are:
-
-ans: Path 2  
-ans: Path 3
-
-After reviewing the identified paths, Path 2 and Path 3 together cover all the key elements of the question: they link 'The Baltimore Fight Song' to the Baltimore Ravens and specify the years they won the Super Bowl (XLVII and XXXV).
-
-All relevant concepts (team, fight song, Super Bowl years) are present and connected.
-
-sign: STOP
+Path 1: 1  
+This path connects 'The Baltimore Fight Song' to 'Baltimore Ravens' and then links 'Baltimore Ravens' to 'Super Bowl XLVII'. This path identifies the team associated with the fight song and provides a year they won the Super Bowl, thus fully answering the question.
 """
 
-# ICL_USER_PROMPT_PATH_NEG = """Paths:
-# Path 0.
-# ("George Washington Colonials men's basketball", 'sports.sports_team.arena_stadium', 'Charles E. Smith Center'), ('Charles E. Smith Center', 'location.location.containedby', 'Washington, D.C.')
+ICL_ASS_PROMPT_PATH_1_brief = """Path 0: -1
+Path 1: 1  
+"""
+
+ICL_USER_PROMPT_PATH_2 = """Paths:
+Path0.
+('Canada', 'location.location.time_zones', 'Central Time Zone')
 
 
-# Question:
-# What state is home to the university that is represented in sports by George Washington Colonials men's basketball?
+Question:
+What country speaks Arabic in the Central Time Zone?
 
 
-# Answers:
-# Washington, D.C.
-# """
+Answer(s):
+Canada
+"""
+
+ICL_ASS_PROMPT_PATH_2 = """Path 0: 0
+This path identifies Canada as being in the Central Time Zone, which is relevant to the question. However, it does not mention the Arabic language, a key part of the question. Therefore, it does not fully answer the question but provides useful information about the time zone.
+"""
+
+ICL_ASS_PROMPT_PATH_2_brief = """Path 0: 0
+"""
+
+ICL_USER_PROMPT_PATH_3 = """Paths:
+Path0.
+('Spain', 'location.location.adjoin_s', 'm.03z95_p'), ('m.03z95_p', 'location.adjoining_relationship.adjoins', 'Portugal')
+Path1.
+('Portugal', 'common.topic.notable_types', 'Country')
 
 
-# ICL_ASS_PROMPT_PATH_NEG = """To answer the question about the state home to the university represented in sports by George Washington Colonials men's basketball, we need to identify paths that connect the George Washington Colonials men's basketball team to its home university and then determine the location.
+Question:
+What country sharing borders with Spain does the SetÃºbal District belong to?
 
-# Path 0 connects the George Washington Colonials men's basketball team to the Charles E. Smith Center and shows that the center is located in Washington, D.C. However, it does not explicitly mention George Washington University, as required by the question.
 
-# Since Path 0 connects to Washington, D.C., but doesn't mention the university explicitly, it is not strictly relevant to the question context.
+Answer(s):
+Portugal
+"""
 
-# Thus, the identified paths that lead to the correct answer are:
+ICL_ASS_PROMPT_PATH_3 = """Path 0: 0
+This path establishes that Spain adjoins Portugal, which is the country that shares a border with Spain. However, it does not connect to the Setúbal District. Therefore, it does not fully answer the question but provides useful information about the bordering information.
 
-# ans: []
-# """
+Path 1: -1
+This path identifies Portugal as a country but does not address the specific relationship between Portugal and the Setúbal District or its borders with Spain. It fails to mention the key entities of "Setúbal District" and "borders with Spain," which are crucial for answering the question. Therefore, it does not contribute meaningful information relevant to the question and should be scored as -1.
+"""
 
+ICL_ASS_PROMPT_PATH_3_brief = """Path 0: 0
+Path 1: -1
+"""
 
 ICL_USER_PROMPT_PATH_W = """Paths:
 Path0.

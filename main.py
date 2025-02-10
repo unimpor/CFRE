@@ -24,36 +24,29 @@ def inference(cfre, test_loader, log_dir):
     K = cfre.K
     all_loss_dict_val = {}
     with torch.no_grad():
-        for _, batch in enumerate(test_loader):
-            _, loss_dict = cfre.inference(batch)
+        for batch in tqdm(test_loader):
+            _, loss_dict = cfre.inference(batch, opj(log_dir, f"logging-inference-ret-{K}.txt"))
             for k, v in loss_dict.items():
                 all_loss_dict_val[k] = all_loss_dict_val.get(k, []) + v
         
         for k, v in all_loss_dict_val.items():
             all_loss_dict_val[k] = np.mean(v)
         
-    write_log(f"Test-Inference" + str(all_loss_dict_val), loggings)
-    torch.save(cfre.evaluation, opj(log_dir, f"evaluation_K{K}.pth"))
-                
+    write_log(f"Test-Inference-Retrieval-{K}" + str(all_loss_dict_val), loggings)
+    torch.save(cfre.evaluation, opj(log_dir, f"inference-ret-{K}.pth"))
+
     
 def train(num_epochs, patience, cfre, train_loader, val_loader, optimizer, log_dir, warmup=True, **kwargs):
     start = kwargs.get("start", 0)
     # best_val_signal = -1
-    best_val_signal = {"recall": -1, "step": -1}
+    best_val_signal = {"recall": -1, "step": -1, "ranking": -1000}
     loggings = opj(log_dir, "logging.txt")
     K = cfre.K
     for epoch in tqdm(range(start, num_epochs)):      
         cfre.train()
-        epoch_loss, val_loss = 0., 0., 0.
+        epoch_loss, val_loss = 0., 0.
         all_loss_dict, all_loss_dict_val = {}, {}
-        # ========= Oracle subset detection ========= 
-        # if epoch == 0:
-        #     for _, batch in enumerate(train_loader):
-        #         cfre.forward_pass_(batch)
-        #     torch.save(cfre.evaluation, opj(log_dir, "evaluation.pth"))
-        #     exit(0)
-        
-        # ========= Training ========= 
+
         for _, batch in enumerate(train_loader):
             optimizer.zero_grad()
             loss, loss_dict = cfre.forward_pass(batch, epoch, training=True)
@@ -92,6 +85,7 @@ def train(num_epochs, patience, cfre, train_loader, val_loader, optimizer, log_d
         
         if epoch - best_epoch >= patience:
             write_log(f'Early stop at epoch {epoch}', loggings)
+            save_checkpoint(cfre.retriever, epoch, log_dir, filename=f"final.pth")
             break
 
 def main():
@@ -108,10 +102,15 @@ def main():
     parser.add_argument('--coeff1', type=float, default=0.1)
     parser.add_argument('--coeff2', type=float, default=0.1)
     parser.add_argument('--tau', type=float, default=1)
+    parser.add_argument('--penalty', type=float, default=0.16)
     parser.add_argument('--ret_num', type=int, default=100)
     parser.add_argument('--start', type=int, default=0, help="start of the training epoch.")
     parser.add_argument('--algo', type=str, default="v2")
     parser.add_argument('--gumbel_strength', type=float, default=1)
+    parser.add_argument('--opath', type=str, default="")
+    parser.add_argument('--comp', action='store_true', help='compliment version for test inference')
+
+
     args = parser.parse_args()
     
     config = yaml.safe_load(open(f"config/{args.dataset}_config.yaml", 'r'))
@@ -121,6 +120,7 @@ def main():
     config['algorithm']['ret_num'] = args.ret_num
     config['algorithm']['algo'] = args.algo
     config['algorithm']['gumbel_strength'] = args.gumbel_strength
+    config['llms']['frequency_penalty'] = args.penalty
     if args.llm_model_name_or_path:
         config['llms']["llm_model_name_or_path"] = config["logging"]["llm"] = args.llm_model_name_or_path
     train_config = config['train']
@@ -139,17 +139,8 @@ def main():
     os.makedirs(log_dir, exist_ok=True)
 
     set_seed(config['env']['seed'])
-
-    
-    # llms_series = {
-    #     "path": LLMs_Ret_Paths,
-    #     "triplet": LLMs_Ret_Triplets,
-    #     "relation": LLMs_Ret_Relations
-    # }
-    # llms = llms_series[args.version](llm_config)
-    # print(args.version, args.ckpt_path)
-
-    # to_preserve = []
+    llms = LLMs(llm_config)
+    # to_preserve = []               
     # to_check = torch.load("logging/cwq/Meta-Llama-3.1-8B-Instruct/DDE/warmup_training_relation/evaluation_K50.pth")
     # for k, v in to_check.items():
     #     gen = v['gen']
@@ -157,10 +148,18 @@ def main():
     #         to_preserve.append(k)
     if args.mode == "inference":
         test_set = RetrievalDataset(config=config["dataset"], split='test', )
-        test_loader = DataLoader(test_set, batch_size=train_config['batch_size'], shuffle=False, collate_fn=collate_fn)
+        if args.comp:
+            results = torch.load(opj(log_dir, f"inference-ret-{args.ret_num}.pth"))
+            bad_samples = [k for k,v in results.items() if 'ans:' not in v['gen'] or 'ans: None' in v['gen']]
+            test_set = [dat for dat in test_set if dat["id"] in bad_samples]
+        print(len(test_set))
+        test_loader = DataLoader(test_set, batch_size=4, shuffle=False, collate_fn=collate_fn)
     else:
-        train_set = RetrievalDataset(config=config["dataset"], split='train', )
+        train_set = RetrievalDataset(config=config["dataset"], split='train', opath=args.opath)
         val_set = RetrievalDataset(config=config["dataset"], split='val', )
+        print(len(train_set))
+        print(np.mean([len(dat["relevant_idx"]) for dat in train_set]),
+              np.mean([len(dat["shortest_path_idx"]) for dat in train_set]),)
         # TODO: False to True
         train_loader = DataLoader(train_set, batch_size=train_config['batch_size'], shuffle=True, collate_fn=collate_fn, drop_last=False)
         val_loader = DataLoader(val_set, batch_size=train_config['batch_size'], shuffle=False, collate_fn=collate_fn)
@@ -170,7 +169,6 @@ def main():
         warmup_ckpt = torch.load(args.ckpt_path, map_location=device)
         ibtn.load_state_dict(warmup_ckpt['model_state_dict'])
     
-    llms = LLMs(llm_config)
     cfre = RLRE(retriever=ibtn, llm_model=llms, config=config['algorithm'])
 
     if args.mode == "inference":

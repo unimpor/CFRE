@@ -1,1 +1,1 @@
-from src.datasets.retrieval import RetrievalDataset
+from src.datasets.retrieval import RetrievalDataset, RetrievalDatasetWithoutEmb

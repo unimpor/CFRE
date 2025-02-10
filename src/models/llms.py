@@ -24,8 +24,12 @@ class LLMs(nn.Module):
         self.data_name = config["data_name"]
         self.cot_mode = config["cot"]
         # prompt config
+        print(config["frequency_penalty"])
         self.system_prompt = SYS_PROMPT
-        self.icl_prompt = [(ICL_USER_PROMPT, ICL_ASS_PROMPT)]
+        self.icl_prompt = [(ICL_USER_PROMPT, ICL_ASS_PROMPT), 
+                           (ICL_USER_PROMPT_2, ICL_ASS_PROMPT_2),
+                           (ICL_USER_PROMPT_3, ICL_ASS_PROMPT_3)
+                           ]
         if "gpt" not in self.model_name:
             client = LLM(model=self.model_name, 
                          tensor_parallel_size=config["tensor_parallel_size"], 
@@ -48,17 +52,21 @@ class LLMs(nn.Module):
                                temperature=config["temperature"], 
                                max_tokens=1000)
     
-    def generate_prompt(self, query, answer, triplets_or_paths):
+    def generate_prompt(self, query, hints, triplets_or_paths):
         """
         Generation conversation given a query-triplet pair.
         """
         if "reverse" in self.prompt_mode:
             triplets_or_paths.reverse()
         triplet_prompt = "Triplets:\n" + "\n".join(triplets_or_paths)
+        
         question_prompt = "Question:\n" + query
         if question_prompt[-1] != '?':
             question_prompt += '?'
-        user_query = "\n\n".join([triplet_prompt, question_prompt])
+        
+        hint_prompt = "Hints:\n" + "\n".join(hints)
+        
+        user_query = "\n\n".join([triplet_prompt, question_prompt, hint_prompt])
  
         return self.pack_prompt(user_query)                
 
@@ -104,13 +112,13 @@ class LLMs(nn.Module):
             print("Max retries exceeded. Please check your rate limits or try again later.")
             return "ans: Not available"
 
-    def forward(self, query_batch, ans_batch, triplet_or_path_batch):
+    def forward(self, query_batch, hint_batch, triplet_or_path_batch):
         
         if "gpt" not in self.model_name:
-            conversation_batch = [self.generate_prompt(q,a,t) for q, a, t in zip(query_batch, ans_batch, triplet_or_path_batch)]
+            conversation_batch = [self.generate_prompt(q,a,t) for q, a, t in zip(query_batch, hint_batch, triplet_or_path_batch)]
             return self.llm_inf(conversation_batch)
         
-        outputs = [self.llm_inf(messages=self.generate_prompt(q,a,t)) for q, a, t in zip(query_batch, ans_batch, triplet_or_path_batch)]
+        outputs = [self.llm_inf(messages=self.generate_prompt(q,a,t)) for q, a, t in zip(query_batch, hint_batch, triplet_or_path_batch)]
         # if "gpt" not in self.model_name:
         #     generations = [output[0].outputs[0].text for output in outputs]
         # else:
@@ -128,10 +136,14 @@ class LLMs_Ret_Paths(LLMs):
     def __init__(self, config):
         super().__init__(config)
         self.system_prompt = SYS_PROMPT_PATH
-        self.icl_prompt = [(ICL_USER_PROMPT_PATH, ICL_ASS_PROMPT_PATH)]
-        # TODO: Webqsp dataset
-        # if self.data_name == "webqsp":
-        #     self.icl_prompt = (ICL_USER_PROMPT_PATH_W, ICL_ASS_PROMPT_PATH_W)
+        self.icl_prompt = []
+        if "gpt" not in self.model_name:
+            self.icl_prompt = [(ICL_USER_PROMPT_PATH_0, ICL_ASS_PROMPT_PATH_0_brief),
+                               (ICL_USER_PROMPT_PATH_1, ICL_ASS_PROMPT_PATH_1_brief),
+                               (ICL_USER_PROMPT_PATH_2, ICL_ASS_PROMPT_PATH_2_brief),
+                               (ICL_USER_PROMPT_PATH_3, ICL_ASS_PROMPT_PATH_3_brief),
+                               ]
+
         self.level = "path"
     
     def oracle_detection(self, id_batch, query_batch, answer_batch, path_batch, **kwargs):
@@ -139,13 +151,12 @@ class LLMs_Ret_Paths(LLMs):
         Note: not a batch-wise version.
         """
         messages_batch = []
-        identified_batch, sign_batch = [], []
+        identified_batch, sign_batch, scores_batch = [], [], []
         for query, answer, triplets_or_paths in zip(query_batch, answer_batch, path_batch):
-            random.shuffle(triplets_or_paths)
             logging = kwargs.get("logging", None)
             formatted_paths = []
             for i, path in enumerate(triplets_or_paths):
-                formatted_path = f"Path{i}.\n"
+                formatted_path = f"Path {i}.\n"
                 # Join each triple as a string and separate them by commas
                 formatted_path += ', '.join([str(triplet) for triplet in path])
                 formatted_paths.append(formatted_path)
@@ -169,15 +180,18 @@ class LLMs_Ret_Paths(LLMs):
             print_log(d, logging)
             print_log(response, logging)
             print_log('\n', logging)
-            identified, sign = get_pred(response), get_sign(response)
-            try:
-                identified = [triplets_or_paths[i] for i in identified]
-            except IndexError as e:
-                identified = []
-            identified_batch.append(identified)
-            sign_batch.append(sign)
-        
-        return identified_batch, sign_batch
+            score_list = get_score(response, len(triplets_or_paths))
+            # print(score_list)
+            scores_batch.append(score_list)
+        #     identified, sign = get_pred(response), get_sign(response)
+        #     try:
+        #         identified = [triplets_or_paths[i] for i in identified]
+        #     except IndexError as e:
+        #         identified = []
+        #     identified_batch.append(identified)
+        #     sign_batch.append(sign)
+        return scores_batch
+        # return identified_batch, sign_batch
         # selected_triplets = [triplet for path in identified for triplet in path]
         # selected_triplets = [all_triplets.index(triplet) for triplet in selected_triplets]
         # return selected_triplets
@@ -266,6 +280,27 @@ def get_sign(prediction):
         return prediction.split("\n")[-1].split(": ")[-1]
     except:
         return "CONTINUE"
+
+def get_score(response, num):
+    path_scores, scores_list = {}, []
+
+    lines = response.split("\n")
+    for line in lines:
+        if line.startswith("Path"):
+            parts = line.split(":")
+            if len(parts) == 2:
+                try:
+                    path_num = int(parts[0].split()[1])
+                    path_value = int(parts[1].strip())
+                    path_scores[path_num] = path_value
+                except:
+                    print("Some format errors. Double check this sample.")
+                    pass
+
+    for i in range(num):
+        scores_list.append(path_scores.get(i, -2))
+    
+    return scores_list
 
 def get_pred(prediction):
     ans_list = []

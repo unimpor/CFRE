@@ -72,26 +72,21 @@ class RLRE(nn.Module):
             reward_batch["recall"].append(recall)
         return reward_batch   
     
-    def cal_loss_down_sampling(self, attn_logtis, relevant_idx, shortest_path_idx, N=2):
+    def cal_loss_down_sampling(self, attn_logtis, relevant_idx, shortest_path_idx):
         # delete unsure negative;
         # sample N * |\wt| negative samples, if N is none, sample all neg.
         logit_list, target_list = [], []
         for logit, pos, boundry in zip(attn_logtis, relevant_idx, shortest_path_idx):
             if len(pos) == 0:
-                print("Not identifying positive.")
                 continue
             target = torch.zeros_like(logit, device=logit.device)
             target[pos] = 1.
+
             pos = torch.tensor(pos, device=logit.device)
             neg_candidates = torch.ones_like(logit, dtype=torch.bool, device=logit.device)
             neg_candidates[pos] = 0
             neg_candidates[boundry] = 0
-            
             neg = torch.nonzero(neg_candidates).squeeze()
-            if len(neg) > N * len(pos):
-                neg = neg[torch.randperm(len(neg))[:N * len(pos)]]
-            else:
-                neg = neg[torch.randperm(len(neg))]
             
             logit_list.append(logit[torch.cat([pos, neg])])
             target_list.append(target[torch.cat([pos, neg])])
@@ -114,27 +109,22 @@ class RLRE(nn.Module):
         logit_list, target_list = [], []
         for logit, pos in zip(attn_logtis, relevant_idx):
             if len(pos) == 0:
-                print("Not identifying positive.")
                 continue
             target = torch.zeros_like(logit, device=logit.device)
             target[pos] = 1.
             
             logit_list.append(logit)
             target_list.append(target)
-            # weighted version
-            # weight = torch.ones_like(logit, device=logit.device)
-            # weight[pos] = 5
-            # weight = weight / weight.sum()
-            # warmup_loss.append(F.binary_cross_entropy_with_logits(logit, target).unsqueeze(0))
+        
         logit_list = torch.cat(logit_list)
         target_list = torch.cat(target_list)
 
         warmup_loss = F.binary_cross_entropy_with_logits(logit_list, target_list)
         return warmup_loss, {"warmup": warmup_loss.item()}
 
-    def inference(self, batch): 
-        graph_batch, answer_batch, triplet_batch, triplet_batch_idx, relevant_idx_batch, question_batch, q_embd_batch, id_batch, shortest_path_idx_batch = \
-            batch["graph"], batch["y"], batch["triplets"], batch['triplet_batch_idx'], batch["relevant_idx"], batch["q"], batch["q_embd"], batch["id"], batch["shortest_path_idx"]
+    def inference(self, batch, logging): 
+        graph_batch, answer_batch, triplet_batch, triplet_batch_idx, relevant_idx_batch, question_batch, q_embd_batch, id_batch, shortest_path_idx_batch, hints_batch = \
+            batch["graph"], batch["y"], batch["triplets"], batch['triplet_batch_idx'], batch["relevant_idx"], batch["q"], batch["q_embd"], batch["id"], batch["shortest_path_idx"], batch["q_entity"]
 
         graph_batch, q_embd_batch = \
             graph_batch.to(self.device), q_embd_batch.to(self.device)
@@ -150,34 +140,59 @@ class RLRE(nn.Module):
             select_batch.append(select_idx)
 
         masked_triplets_batch, _ = self.mask_triplet(triplet_batch, select_batch)
-        generation_batch = self.llms(question_batch, answer_batch, masked_triplets_batch)
+        generation_batch = self.llms(question_batch, hints_batch, masked_triplets_batch)
+        for dat_id, g in zip(id_batch, generation_batch):
+            print_log(dat_id, logging)
+            print_log(g, logging)
         reward_loggings = self.cal_reward(generation_batch, question_batch, answer_batch, id_batch, 0, training=False)
         return 0, reward_loggings
 
     @torch.no_grad()
-    def oracle_detection(self, batch, epoch, update_reference=False):
-        graph_batch, answer_batch, triplet_batch, triplet_batch_idx, relevant_idx_batch, question_batch, q_embd_batch, id_batch, paths_batch = \
-            batch["graph"], batch["y"], batch["triplets"], batch['triplet_batch_idx'], batch["relevant_idx"], batch["q"], batch["q_embd"], batch["id"], batch["relevant_paths"]
+    def oracle_detection(self, batch, logging):
+        graph_batch, answer_batch, triplet_batch, triplet_batch_idx, question_batch, q_embd_batch, id_batch, paths_batch = \
+            batch["graph"], batch["y"], batch["triplets"], batch['triplet_batch_idx'], batch["q"], batch["q_embd"], batch["id"], batch["relevant_paths"]
 
         graph_batch, q_embd_batch = \
             graph_batch.to(self.device), q_embd_batch.to(self.device)
+        
+        selected_batch = self.llms.oracle_detection(id_batch, question_batch, answer_batch, paths_batch, logging=logging)
 
-        for i, (d, q, a, p, allt) in enumerate(zip(id_batch, question_batch, answer_batch, paths_batch, triplet_batch)):
-            # g = self.llms([q], [a], [p])
-            selected = self.llms.oracle_detection(q, a, p, allt)
-            self.evaluation[d] = selected
-
+        for d, s in zip(id_batch, selected_batch):
+            d = d.split("+")[0]
+            if d in self.evaluation:
+                self.evaluation[d].extend(s)
+            else:
+                self.evaluation[d] = s
+            # self.evaluation[d] = {"selected": s}
+            
     def forward_pass(self, batch, epoch, training=True): 
         graph_batch, answer_batch, triplet_batch, triplet_batch_idx, relevant_idx_batch, question_batch, q_embd_batch, id_batch, shortest_path_idx_batch = \
-            batch["graph"], batch["y"], batch["triplets"], batch['triplet_batch_idx'], batch["relevant_idx"], batch["q"], batch["q_embd"], batch["id"], batch["shortest_path_idx"]
+            batch["graph"], batch["a_entity"], batch["triplets"], batch['triplet_batch_idx'], batch["relevant_idx"], batch["q"], batch["q_embd"], batch["id"], batch["shortest_path_idx"]
 
         graph_batch, q_embd_batch = \
             graph_batch.to(self.device), q_embd_batch.to(self.device)
 
         attn_logits_batch = self.retriever(graph_batch, q_embd_batch)
         logits_batch = []
-        reward_loggings = {"recall": [], "step": []}
+        reward_loggings = {"recall": [], "step": [], "ranking": []}
         
+        def get_avg_ranks(all_triples, sorted_indices, ans_list):
+            ranks = []
+            ans_list_ = deepcopy(remove_duplicates(ans_list))
+            for rank, idx in enumerate(sorted_indices):
+                to_check = all_triples[idx]
+                if to_check[0] in ans_list_:
+                    ans_list_.remove(to_check[0])
+                    ranks.append(rank)
+                if to_check[1] in ans_list_:
+                    ans_list_.remove(to_check[1])
+                    ranks.append(rank)
+                if not ans_list_:
+                    break
+            if len(ans_list_) > 0:
+                ranks += [len(sorted_indices)] * len(ans_list_)
+            return -np.mean(ranks)
+                
         for i, dat_id in enumerate(id_batch):
             attn_logit = attn_logits_batch[triplet_batch_idx == i]
             logits_batch.append(attn_logit)
@@ -193,6 +208,7 @@ class RLRE(nn.Module):
                 
                 reward_loggings["recall"].append(float(len(recall) / len(ans_list)))
                 reward_loggings["step"].append(float(len(step) / len(selected_triplets)))
+                reward_loggings["ranking"].append(get_avg_ranks(all_triplets, select_idx, ans_list))
                 
         if not training:
             reward_loggings = {k:np.mean(v).item() for k,v in reward_loggings.items()}
@@ -244,24 +260,6 @@ class RLRE(nn.Module):
             # masked_token_ids = attns * triplets_token_ids
         return masked_triplets_batch, masked_attns_batch
         # return masked_token_ids
-
-    def case_study(self, id_batch, question_batch, answer_batch, triplet_batch, select_idx, gt_idx):
-        
-        print_log(id_batch[0])
-        print_log(question_batch[0])
-        print_log(answer_batch[0])
-        
-        print_log("select cases:")
-        print_log(select_idx[0])
-        masked_triplets_batch, _ = self.mask_triplet(triplet_batch, select_idx)
-        generation_batch = self.llms(question_batch, masked_triplets_batch)
-        print_log(generation_batch[0])
-
-        print_log("weak signal cases:")
-        print_log(gt_idx[0])
-        masked_triplets_batch, _ = self.mask_triplet(triplet_batch, gt_idx)
-        generation_batch = self.llms(question_batch, masked_triplets_batch)
-        print_log(generation_batch[0])
 
 def remove_duplicates(input_list):
     seen = set()
