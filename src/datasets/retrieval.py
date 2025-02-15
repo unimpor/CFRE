@@ -55,16 +55,12 @@ class RetrievalDataset:
             sample_embd = embs.get(sample_id, None)
             if not sample_embd:
                 continue
-            if self.split == "train":
-                # if not dat or dat["sign"] != "STOP":
-                dat =  oracle_paths_cache.get(sample_id, None)
-                if not dat:
-                    continue                
-            
             if self.split == "test" and self.post_filter and sample_id in filtering_id:
                 continue
-            # sample_embd = embs[sample_id] # 'entity_embs', 'q_emb', 'relation_embs'
             # oracle_paths = dat["selected"] if self.split == "train" else []
+            dat =  oracle_paths_cache.get(sample_id, []) if self.split == "train" else []
+            if self.split == "train" and not dat:
+                continue
             shortest_paths = shortest_paths_cache[sample_id] if self.split == "train" else []
             # assert len(shortest_paths) == len(dat)
             oracle_paths = [shortest_paths[idx] for idx, sign in enumerate(dat) if sign in [0,1]] if self.split == "train" else []
@@ -351,8 +347,8 @@ class RetrievalDatasetWithoutEmb(RetrievalDataset):
             
             # relevant_paths = self._extract_paths_(sample=sample)
             # relevant_paths = [[all_triplets[i] for i in path] for path in relevant_paths]
-            
             # shortest_paths_cache[sample_id] = relevant_paths
+
             # scored_data[sample_id]["relevant_paths_1"] = relevant_paths_1
             # print("Done" + " " + sample_id)
             # for idx, path in enumerate(relevant_idx_):

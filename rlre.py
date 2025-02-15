@@ -101,6 +101,33 @@ class RLRE(nn.Module):
         
         return warmup_loss, {"warmup": warmup_loss.item()}
 
+    def cal_loss_multi_cat(self, attn_logits, scores):
+        warmup_loss = F.cross_entropy(attn_logits, scores)
+        return warmup_loss, {"warmup": warmup_loss.item()}
+
+    def cal_loss_with_weights(self, attn_logtis, relevant_idx, hard_idx, w=5):
+        
+        logit_list, target_list, weight_list = [], [], []
+        for logit, pos, hard in zip(attn_logtis, relevant_idx, hard_idx):
+            if len(pos) == 0:
+                continue
+            target = torch.zeros_like(logit, device=logit.device)
+            target[pos] = 1.
+
+            weight = torch.ones_like(logit, device=logit.device)
+            weight[hard] = w
+            
+            logit_list.append(logit)
+            target_list.append(target)
+            weight_list.append(weight)
+        
+        logit_list = torch.cat(logit_list)
+        target_list = torch.cat(target_list)
+        weight_list = torch.cat(weight_list)
+
+        warmup_loss = F.binary_cross_entropy_with_logits(logit_list, target_list, weight_list)
+        return warmup_loss, {"warmup": warmup_loss.item()}
+
     def cal_loss(self, attn_logtis, relevant_idx):
         # batch version
         # target = torch.zeros_like(attn_logtis, device=attn_logtis.device)
@@ -172,7 +199,7 @@ class RLRE(nn.Module):
         graph_batch, q_embd_batch = \
             graph_batch.to(self.device), q_embd_batch.to(self.device)
 
-        attn_logits_batch = self.retriever(graph_batch, q_embd_batch)
+        attn_logits_batch = self.retriever(graph_batch, q_embd_batch)  # [B, N]
         logits_batch = []
         reward_loggings = {"recall": [], "step": [], "ranking": []}
         
@@ -269,3 +296,20 @@ def remove_duplicates(input_list):
             result.append(item)
             seen.add(item)
     return result
+
+def get_avg_ranks(all_triples, sorted_indices, ans_list):
+    ranks = []
+    ans_list_ = deepcopy(remove_duplicates(ans_list))
+    for rank, idx in enumerate(sorted_indices):
+        to_check = all_triples[idx]
+        if to_check[0] in ans_list_:
+            ans_list_.remove(to_check[0])
+            ranks.append(rank)
+        if to_check[-1] in ans_list_:
+            ans_list_.remove(to_check[-1])
+            ranks.append(rank)
+        if not ans_list_:
+            break
+    if len(ans_list_) > 0:
+        ranks += [len(sorted_indices)] * len(ans_list_)
+    return -np.mean(ranks)
