@@ -24,9 +24,10 @@ class RetrievalDataset:
         self.data_name = config['name']
         self.post_filter = True  # filter bad samples.
         self.oracle_path = opath
-        self.version = kwargs.get("version", None)  # tmp arg  
-        if self.version in ["path", "triplet", "relation"]:
-            self.tmp_data = torch.load(f"datasets/{self.data_name}/checkpoints/reward_alloc.pth")[self.version]    
+        self.training = kwargs.get("training", True)
+        # self.version = kwargs.get("version", None)  # tmp arg  
+        # if self.version in ["path", "triplet", "relation"]:
+        #     self.tmp_data = torch.load(f"datasets/{self.data_name}/checkpoints/reward_alloc.pth")[self.version]    
         
         raw_data = self._load_data(opj(self.root, self.data_name, "processed", f"{self.split}.pkl"))
         # embs = self._load_emb()
@@ -41,29 +42,33 @@ class RetrievalDataset:
 
     def process(self, raw_data, ):
         embs = self._load_emb()
-        # only for the need of training
-        # oracle_paths_cache = torch.load("logging_detection/cwq/gpt-4o-mini/DDE/path-detection-first-half/evaluation_full.pth")
-        if self.split == "train":
+        if self.training:
             shortest_paths_cache = torch.load("datasets/cwq/processed/shortest_path.pth")
             oracle_paths_cache = torch.load(self.oracle_path)
+            # TODO: hard paths cache ??
         # only for the need of test
-        # TODO: filtering id
         filtering_id = torch.load("datasets/cwq/processed/test_filtering_bad_ids.pth") + torch.load("datasets/cwq/processed/test_filtering_bad_ids2.pth")
         processed_data = []
         for sample in raw_data:
             sample_id = sample['id']
             sample_embd = embs.get(sample_id, None)
             if not sample_embd:
-                continue
+                continue            
             if self.split == "test" and self.post_filter and sample_id in filtering_id:
                 continue
-            # oracle_paths = dat["selected"] if self.split == "train" else []
-            dat =  oracle_paths_cache.get(sample_id, []) if self.split == "train" else []
-            if self.split == "train" and not dat:
+            # shortest path: [path0, path1, ...]
+            # dat: [0, -1, 1]
+            dat =  oracle_paths_cache.get(sample_id, []) if self.training else []
+            if self.training and not dat:
                 continue
-            shortest_paths = shortest_paths_cache[sample_id] if self.split == "train" else []
+            shortest_paths = shortest_paths_cache[sample_id] if self.training else []
             # assert len(shortest_paths) == len(dat)
-            oracle_paths = [shortest_paths[idx] for idx, sign in enumerate(dat) if sign in [0,1]] if self.split == "train" else []
+            # oracle_paths = []
+            # if self.training:
+            #     # target = 1 if 1 in dat else 0
+            #     # oracle_paths = [path for (path, s) in zip(shortest_paths, dat) if s == target]
+            #     oracle_paths = [path for (path, s) in zip(shortest_paths, dat) if s in [0,1]]
+            oracle_paths = dat
 
             all_entities = sample["text_entity_list"] + sample["non_text_entity_list"]
             all_relations = sample["relation_list"]
@@ -89,6 +94,14 @@ class RetrievalDataset:
             oracle_path_idx = [all_triplets.index(item) for path in oracle_paths for item in path]
             oracle_path_idx = remove_duplicates(oracle_path_idx)
             
+            # map {-1, 0, 1} in shortest path to {1, 2, 3} 
+            scores = -torch.ones(len(all_triplets))
+            # for path, score in zip(shortest_paths, dat):
+            #     for t in path:
+            #         scores[all_triplets.index(t)] = max(score, -1)
+            # scores = (scores + 1).long()
+
+
             processed_sample = {
                 "id": sample_id,
                 "q": sample["question"],
@@ -98,10 +111,8 @@ class RetrievalDataset:
                 "triplets": all_triplets,
                 "relevant_idx": oracle_path_idx,
                 "shortest_path_idx": shortest_path_idx,
-                # "shortest_paths_plus_1": sample_scored.get("relevant_paths_1", []),
-                # "y": sample_scored['a_entity_in_graph'] if self.split != "test" else sample["a_entity"],
                 "y": sample["a_entity"],
-                "graph": Data(x=x, edge_attr=edge_attr, edge_index=edge_index.long(), topic_signal=topic_entity_one_hot.float())
+                "graph": Data(x=x, scores=scores, edge_attr=edge_attr, edge_index=edge_index.long(), topic_signal=topic_entity_one_hot.float())
             }
             assert processed_sample["graph"].topic_signal.shape[0] == processed_sample["graph"].x.shape[0]
             processed_data.append(processed_sample)
@@ -149,8 +160,6 @@ class RetrievalDataset:
         path_list_ = []
         for q_entity_id in sample['q_entity_id_list']:
             for a_entity_id in sample['a_entity_id_list']:
-                # find shortest_path + k
-                # TODO: k=1 is enough.
                 paths_q_a = self._shortest_path(nx_g, q_entity_id, a_entity_id)
                 # if len(paths_q_a) > 0:
                 #     shortest_len = len(paths_q_a[0]) - 1
@@ -295,11 +304,14 @@ class RetrievalDatasetWithoutEmb(RetrievalDataset):
 
     def process(self, raw_data):
         print("begin")
+        preserve = list(torch.load("logging/cwq/gpt-4o-mini/DDE/path-level-detection/inference-ret-50.pth").keys())
         processed_data = []
         # only for the need of training
         shortest_paths_cache = torch.load("datasets/cwq/processed/shortest_path.pth")
         for sample in raw_data:
             sample_id = sample['id']
+            if self.split == "test" and sample_id not in preserve:
+                continue
             # if sample_id not in ["WebQTest-2008_8c6b952c6bd963f0ece4e401c9eb731a", 
             #                      "WebQTrn-2518_1ef15e22372df70baf01b72850deb14d", 
             #                      "WebQTest-415_b6ad66a3f1f515d0688c346e16d202e6",
@@ -384,6 +396,7 @@ class RetrievalDatasetWithoutEmb(RetrievalDataset):
         # torch.save(shortest_paths_cache, opj(self.root, self.data_name, "processed", f"shortest_path.pth"))
         # input("success")
         return split_samples(processed_data)
+        # return processed_data
 
 
 

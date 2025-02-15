@@ -44,11 +44,11 @@ class RLRE(nn.Module):
     def device(self):
         return self.retriever.device
 
-    def cal_reward_single(self, t, idx, q, a):
-        masked_triplets_batch, _ = self.mask_triplet([t], [idx])
-        g = self.llms([q], masked_triplets_batch)
-        print_log(g[0])
-        return self.reward_metrics.calc_r(g[0],a,q), g[0]
+    # def cal_reward_single(self, t, idx, q, a):
+    #     masked_triplets_batch, _ = self.mask_triplet([t], [idx])
+    #     g = self.llms([q], masked_triplets_batch)
+    #     print_log(g[0])
+    #     return self.reward_metrics.calc_r(g[0],a,q), g[0]
 
     def cal_reward(self, g_batch, q_batch, a_batch, id_batch, epoch, training):
         """
@@ -60,13 +60,17 @@ class RLRE(nn.Module):
             "recall": [],
         }
         for g,q,a,d in zip(g_batch, q_batch, a_batch, id_batch):
-            (f1, prec, recall), _ = self.reward_metrics.calc_r(g,a,q)
+            (f1, prec, recall), (matched, not_prec, missing) = self.reward_metrics.calc_r(g,a,q)
             print(f1, prec, recall)
-            self.evaluation[d]["F1"] = f1
-            self.evaluation[d]["precision"] = prec
-            self.evaluation[d]["recall"] = recall
-            self.evaluation[d]["gen"] = g
-
+            self.evaluation[d].update({
+                "F1": f1,
+                "precision": prec,
+                "recall": recall,
+                "gen": g,
+                "matched": matched,
+                "not_prec": not_prec,
+                "missing": missing
+            })
             reward_batch["F1"].append(f1)
             reward_batch["precision"].append(prec)
             reward_batch["recall"].append(recall)
@@ -106,7 +110,7 @@ class RLRE(nn.Module):
         return warmup_loss, {"warmup": warmup_loss.item()}
 
     def cal_loss_with_weights(self, attn_logtis, relevant_idx, hard_idx, w=5):
-        
+
         logit_list, target_list, weight_list = [], [], []
         for logit, pos, hard in zip(attn_logtis, relevant_idx, hard_idx):
             if len(pos) == 0:
@@ -149,7 +153,7 @@ class RLRE(nn.Module):
         warmup_loss = F.binary_cross_entropy_with_logits(logit_list, target_list)
         return warmup_loss, {"warmup": warmup_loss.item()}
 
-    def inference(self, batch, logging): 
+    def inference(self, batch, logging, retrieval=True): 
         graph_batch, answer_batch, triplet_batch, triplet_batch_idx, relevant_idx_batch, question_batch, q_embd_batch, id_batch, shortest_path_idx_batch, hints_batch = \
             batch["graph"], batch["y"], batch["triplets"], batch['triplet_batch_idx'], batch["relevant_idx"], batch["q"], batch["q_embd"], batch["id"], batch["shortest_path_idx"], batch["q_entity"]
 
@@ -157,12 +161,18 @@ class RLRE(nn.Module):
             graph_batch.to(self.device), q_embd_batch.to(self.device)
 
         attn_logits_batch = self.retriever(graph_batch, q_embd_batch)
+        # if len(attn_logits_batch.shape) > 1:
+        #     probs_batch = F.softmax(attn_logits_batch, dim=-1)
+        #     class_values = torch.arange(probs_batch.shape[1], dtype=torch.float32, device=probs_batch.device)
+        #     attn_logits_batch = torch.sum(probs_batch * class_values, dim=-1)
+
         select_batch = []
         
         for i, dat_id in enumerate(id_batch):
             attn_logit = attn_logits_batch[triplet_batch_idx == i]
             _, select_idx = self.sampling_v3(attn_logit, K=self.K)
-            
+            if not retrieval:
+                select_idx = shortest_path_idx_batch[i]
             self.evaluation[dat_id] = {"select": select_idx}
             select_batch.append(select_idx)
 
@@ -195,6 +205,7 @@ class RLRE(nn.Module):
     def forward_pass(self, batch, epoch, training=True): 
         graph_batch, answer_batch, triplet_batch, triplet_batch_idx, relevant_idx_batch, question_batch, q_embd_batch, id_batch, shortest_path_idx_batch = \
             batch["graph"], batch["a_entity"], batch["triplets"], batch['triplet_batch_idx'], batch["relevant_idx"], batch["q"], batch["q_embd"], batch["id"], batch["shortest_path_idx"]
+        # TODO: hard_idx_batch = batch["hard_idx"]
 
         graph_batch, q_embd_batch = \
             graph_batch.to(self.device), q_embd_batch.to(self.device)
@@ -203,23 +214,11 @@ class RLRE(nn.Module):
         logits_batch = []
         reward_loggings = {"recall": [], "step": [], "ranking": []}
         
-        def get_avg_ranks(all_triples, sorted_indices, ans_list):
-            ranks = []
-            ans_list_ = deepcopy(remove_duplicates(ans_list))
-            for rank, idx in enumerate(sorted_indices):
-                to_check = all_triples[idx]
-                if to_check[0] in ans_list_:
-                    ans_list_.remove(to_check[0])
-                    ranks.append(rank)
-                if to_check[1] in ans_list_:
-                    ans_list_.remove(to_check[1])
-                    ranks.append(rank)
-                if not ans_list_:
-                    break
-            if len(ans_list_) > 0:
-                ranks += [len(sorted_indices)] * len(ans_list_)
-            return -np.mean(ranks)
-                
+        if not training and len(attn_logits_batch.shape) > 1:
+            probs_batch = F.softmax(attn_logits_batch, dim=-1)
+            class_values = torch.arange(probs_batch.shape[1], dtype=torch.float32, device=probs_batch.device)
+            attn_logits_batch = torch.sum(probs_batch * class_values, dim=-1)
+
         for i, dat_id in enumerate(id_batch):
             attn_logit = attn_logits_batch[triplet_batch_idx == i]
             logits_batch.append(attn_logit)
@@ -241,8 +240,11 @@ class RLRE(nn.Module):
             reward_loggings = {k:np.mean(v).item() for k,v in reward_loggings.items()}
             return 0, reward_loggings
         
-        # loss, reward_loggings = self.cal_loss_down_sampling(logits_batch, relevant_idx_batch, shortest_path_idx_batch)
+
         loss, reward_loggings = self.cal_loss(logits_batch, relevant_idx_batch)
+        # loss, reward_loggings = self.cal_loss_multi_cat(attn_logits_batch, graph_batch.scores)
+        # TODO: new version
+        # loss, reward_loggings = self.cal_loss_with_weights(attn_logits_batch, relevant_idx_batch, hard_idx_batch)
         return loss, reward_loggings
 
     def sampling_v3(self, tensor, training=False, K=6):
@@ -253,15 +255,15 @@ class RLRE(nn.Module):
     def sampling_v2(self, tensor, training=False, K=6):
         indices = torch.arange(len(tensor), device=tensor.device)
     
-        positive_indices = indices[tensor > 0]
-        positive_values = tensor[tensor > 0]
+        positive_indices = indices[tensor > -3.5]
+        positive_values = tensor[tensor > -3.5]
 
-        if len(positive_indices) > K:
-            sorted_indices = torch.argsort(positive_values, descending=True)
-            positive_indices = positive_indices[sorted_indices]
-        else:
-            sorted_indices = torch.argsort(tensor, descending=True)
-            positive_indices = sorted_indices[:K]
+        # if len(positive_indices) > K:
+        sorted_indices = torch.argsort(positive_values, descending=True)
+        positive_indices = positive_indices[sorted_indices]
+        # else:
+        #     sorted_indices = torch.argsort(tensor, descending=True)
+        #     positive_indices = sorted_indices[:K]
         return None, positive_indices.tolist()
 
     def mask_triplet(self, triplets_batch, select_idx_batch, to_str=True):

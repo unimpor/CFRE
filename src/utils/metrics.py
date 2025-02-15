@@ -65,19 +65,24 @@ class RewardMetrics:
         num_pred = len(prediction)
         num_ans = len(answer)
         double_check = any([keyword in question.lower() for keyword in ['when', 'what year', 'which year', 'where', 'sport', "what countr", "language", 'nba finals', 'world series']])
-        matched = 0.
+        matched, matched_list = 0., []
         for a in answer:
             for pred in prediction:
                 if match(pred, a):
                     matched += 1
+                    matched_list.append(a)
                     prediction.remove(pred)
                     break
                 elif double_check:
                     if match(a, pred.split('ans:')[-1].strip()) or match(a, pred):
                         matched += 1
+                        matched_list.append(a)
                         prediction.remove(pred)
                         break
-        return self.metrics_func(matched, num_pred, num_ans)
+        not_prec_list = prediction
+        missing_list = [a for a in answer if a not in matched_list]
+        
+        return self.metrics_func(matched, num_pred, num_ans), (matched_list, not_prec_list, missing_list)
     
     def precision(self, matched, num_pred, num_ans):
         if num_pred == 0:
@@ -85,6 +90,8 @@ class RewardMetrics:
         return matched / num_pred, matched, num_pred
     
     def recall(self, matched, num_pred, num_ans):
+        if num_ans == 0:
+            return 0, 0, 0
         return matched / num_ans, matched, num_ans
     
     def F1(self, matched, num_pred, num_ans):
