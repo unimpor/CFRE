@@ -3,12 +3,13 @@ import numpy as np
 import pandas as pd
 import torch.nn as nn
 import torch.nn.functional as F
-from src.utils import RewardMetrics, gumbel_topk, print_log
+from src.utils import RewardMetrics, gumbel_topk, print_log, reorder
 import copy
 import random
 import math
 from collections import Counter
 from copy import deepcopy
+import networkx as nx
 
 
 class RLRE(nn.Module):
@@ -19,7 +20,7 @@ class RLRE(nn.Module):
         super().__init__()
         self.retriever = retriever
         self.llms = llm_model
-        self.coeff1 = float(config['coeff1'])  # trade-off coeff between RL and regularization
+        self.coeff1 = float(config['coeff1'])
         self.coeff2 = float(config['coeff2'])
         self.algo = config["algo"]
         self.metrics_name = config["reward_metrics"]
@@ -28,17 +29,16 @@ class RLRE(nn.Module):
         self.regularize = config["regularize"]
         self.K = config["ret_num"]
         self.evaluation = {}
-        print(self.K)
-        self.set_moving_baseline = config["set_moving_baseline"]
+        self.add_hard = kwargs.get("add_hard", True)
+        self.reorder = kwargs.get("reorder", False)
         self.eps = 1e-6  # for numerical stability
-        self.criterion = nn.BCEWithLogitsLoss(reduction="mean")
         self.strategy = config["filtering"]
         self.filter_num_or_ratio = config["filtering_num_or_ratio"]
         self.gumbel_strength = float(config["gumbel_strength"])
         self.tau = float(config["tau"])
-        self.baseline_order_invariant = config["baseline_order_invariant"]
         self.update_num = 0
-        self.noise_generator = torch.Generator(device=self.device)
+        self.weight = kwargs.get("weight", 1.0)
+        print(self.K, self.add_hard, self.weight)
         
     @property
     def device(self):
@@ -76,41 +76,11 @@ class RLRE(nn.Module):
             reward_batch["recall"].append(recall)
         return reward_batch   
     
-    def cal_loss_down_sampling(self, attn_logtis, relevant_idx, shortest_path_idx):
-        # delete unsure negative;
-        # sample N * |\wt| negative samples, if N is none, sample all neg.
-        logit_list, target_list = [], []
-        for logit, pos, boundry in zip(attn_logtis, relevant_idx, shortest_path_idx):
-            if len(pos) == 0:
-                continue
-            target = torch.zeros_like(logit, device=logit.device)
-            target[pos] = 1.
-
-            pos = torch.tensor(pos, device=logit.device)
-            neg_candidates = torch.ones_like(logit, dtype=torch.bool, device=logit.device)
-            neg_candidates[pos] = 0
-            neg_candidates[boundry] = 0
-            neg = torch.nonzero(neg_candidates).squeeze()
-            
-            logit_list.append(logit[torch.cat([pos, neg])])
-            target_list.append(target[torch.cat([pos, neg])])
-
-        if not logit_list or not target_list:
-            return torch.tensor(0.0, device=attn_logtis.device), {"warmup": 0.0}
-        
-        logit_list = torch.cat(logit_list)
-        target_list = torch.cat(target_list)
-        
-        warmup_loss = F.binary_cross_entropy_with_logits(logit_list, target_list)
-        
-        return warmup_loss, {"warmup": warmup_loss.item()}
-
     def cal_loss_multi_cat(self, attn_logits, scores):
         warmup_loss = F.cross_entropy(attn_logits, scores)
         return warmup_loss, {"warmup": warmup_loss.item()}
 
-    def cal_loss_with_weights(self, attn_logtis, relevant_idx, hard_idx, w=5):
-
+    def cal_loss_with_weights(self, attn_logtis, relevant_idx, hard_idx):
         logit_list, target_list, weight_list = [], [], []
         for logit, pos, hard in zip(attn_logtis, relevant_idx, hard_idx):
             if len(pos) == 0:
@@ -119,7 +89,7 @@ class RLRE(nn.Module):
             target[pos] = 1.
 
             weight = torch.ones_like(logit, device=logit.device)
-            weight[hard] = w
+            weight[hard] = self.weight
             
             logit_list.append(logit)
             target_list.append(target)
@@ -128,17 +98,21 @@ class RLRE(nn.Module):
         logit_list = torch.cat(logit_list)
         target_list = torch.cat(target_list)
         weight_list = torch.cat(weight_list)
+        if self.add_hard:
+            warmup_loss = F.binary_cross_entropy_with_logits(logit_list, target_list, weight_list)
+        else:
+            warmup_loss = F.binary_cross_entropy_with_logits(logit_list, target_list)
+        lengths = [len(sublist) for sublist in hard_idx]
+        return warmup_loss, {"warmup": warmup_loss.item(), "hard_len": sum(lengths) / len(lengths)}
 
-        warmup_loss = F.binary_cross_entropy_with_logits(logit_list, target_list, weight_list)
-        return warmup_loss, {"warmup": warmup_loss.item()}
-
-    def cal_loss(self, attn_logtis, relevant_idx):
+    def cal_loss(self, attn_logtis, relevant_idx, relevant_idx_in_path, epoch):
         # batch version
         # target = torch.zeros_like(attn_logtis, device=attn_logtis.device)
         # target[relevant_idx] = 1.
         # warmup_loss = F.binary_cross_entropy_with_logits(attn_logtis, target)
-        logit_list, target_list = [], []
-        for logit, pos in zip(attn_logtis, relevant_idx):
+        logit_list, target_list, cons_loss_list = [], [], []
+
+        for logit, pos, paths in zip(attn_logtis, relevant_idx, relevant_idx_in_path):
             if len(pos) == 0:
                 continue
             target = torch.zeros_like(logit, device=logit.device)
@@ -146,12 +120,42 @@ class RLRE(nn.Module):
             
             logit_list.append(logit)
             target_list.append(target)
-        
+            for p in paths:
+                if len(p) > 1:
+                    assert all(x in pos for x in p)
+                    # cons_loss_list.append((logit[p] - logit[p].mean().detach()) ** 2)
+                    # closer to mean and larger than 0
+                    # cons_loss_list.append((logit[p] - torch.maximum(logit[p].mean(), torch.tensor(0.0).to(logit.device)).detach()) ** 2)
+                    
+                    # # TODO var-like loss
+                    vmax = torch.maximum(logit[p].max(), torch.tensor(0.0).to(logit.device))
+                    # target = torch.where(
+                    #     vmax - logit[p] <= self.coeff2,
+                    #     vmax,
+                    #     logit[p] + self.coeff2
+                    # ).to(logit.device)
+                    # cons = (logit[p] - target.detach()) ** 2
+                    cons = (logit[p] - vmax.detach()) ** 2
+                    cons_loss_list.append(cons)
+
+                    # TODO series loss
+                    # for i in range(len(p)):
+                    #     for j in range(i + 1, len(p)):
+                    #         logit_i = logit[p[i]]
+                    #         logit_j = logit[p[j]]
+                    #         cons_loss_list.append(((logit_i - logit_j) ** 2).unsqueeze(0))
+                     
         logit_list = torch.cat(logit_list)
         target_list = torch.cat(target_list)
+        cons_loss_list = torch.cat(cons_loss_list)
+        # loss clamp
+        # cons_loss_list = torch.clip(cons_loss_list, max=self.coeff2)
 
         warmup_loss = F.binary_cross_entropy_with_logits(logit_list, target_list)
-        return warmup_loss, {"warmup": warmup_loss.item()}
+        cons_loss = torch.mean(cons_loss_list)
+        
+        total_loss = warmup_loss + self.coeff1 * cons_loss if epoch > 2 else warmup_loss
+        return total_loss, {"warmup": warmup_loss.item(), "consistency": cons_loss.item()}
 
     def inference(self, batch, logging, retrieval=True): 
         graph_batch, answer_batch, triplet_batch, triplet_batch_idx, relevant_idx_batch, question_batch, q_embd_batch, id_batch, shortest_path_idx_batch, hints_batch = \
@@ -161,18 +165,16 @@ class RLRE(nn.Module):
             graph_batch.to(self.device), q_embd_batch.to(self.device)
 
         attn_logits_batch = self.retriever(graph_batch, q_embd_batch)
-        # if len(attn_logits_batch.shape) > 1:
-        #     probs_batch = F.softmax(attn_logits_batch, dim=-1)
-        #     class_values = torch.arange(probs_batch.shape[1], dtype=torch.float32, device=probs_batch.device)
-        #     attn_logits_batch = torch.sum(probs_batch * class_values, dim=-1)
-
         select_batch = []
         
         for i, dat_id in enumerate(id_batch):
             attn_logit = attn_logits_batch[triplet_batch_idx == i]
             _, select_idx = self.sampling_v3(attn_logit, K=self.K)
-            if not retrieval:
-                select_idx = shortest_path_idx_batch[i]
+            # if not retrieval:
+            #     select_idx = shortest_path_idx_batch[i]
+            if self.reorder:
+                select_idx = reorganize(triplet_batch[i], hints_batch[i], select_idx, attn_logit)
+
             self.evaluation[dat_id] = {"select": select_idx}
             select_batch.append(select_idx)
 
@@ -205,26 +207,25 @@ class RLRE(nn.Module):
     def forward_pass(self, batch, epoch, training=True): 
         graph_batch, answer_batch, triplet_batch, triplet_batch_idx, relevant_idx_batch, question_batch, q_embd_batch, id_batch, shortest_path_idx_batch = \
             batch["graph"], batch["a_entity"], batch["triplets"], batch['triplet_batch_idx'], batch["relevant_idx"], batch["q"], batch["q_embd"], batch["id"], batch["shortest_path_idx"]
-        # TODO: hard_idx_batch = batch["hard_idx"]
+        hard_idx_batch, relevant_idx_in_path_batch = batch["hard_idx"], batch["relevant_idx_in_path"]
 
         graph_batch, q_embd_batch = \
             graph_batch.to(self.device), q_embd_batch.to(self.device)
 
         attn_logits_batch = self.retriever(graph_batch, q_embd_batch)  # [B, N]
-        logits_batch = []
+        logits_batch, hard_idx_batch_ = [], []
         reward_loggings = {"recall": [], "step": [], "ranking": []}
         
-        if not training and len(attn_logits_batch.shape) > 1:
-            probs_batch = F.softmax(attn_logits_batch, dim=-1)
-            class_values = torch.arange(probs_batch.shape[1], dtype=torch.float32, device=probs_batch.device)
-            attn_logits_batch = torch.sum(probs_batch * class_values, dim=-1)
-
         for i, dat_id in enumerate(id_batch):
             attn_logit = attn_logits_batch[triplet_batch_idx == i]
             logits_batch.append(attn_logit)
-            if not training:
-                _, select_idx = self.sampling_v3(attn_logit, K=self.K)
+            _, select_idx = self.sampling_v3(attn_logit, K=self.K if not training else 200)
 
+            hard_idx = hard_idx_batch[i]
+            hard_idx = [i for i in hard_idx if i in select_idx]
+            hard_idx_batch_.append(hard_idx)
+
+            if not training:
                 all_triplets, ans_list = triplet_batch[i], answer_batch[i]
                 selected_triplets = [all_triplets[idx] for idx in select_idx]
                 selected_entities = [t[0] for t in selected_triplets] + [t[-1] for t in selected_triplets]
@@ -241,10 +242,9 @@ class RLRE(nn.Module):
             return 0, reward_loggings
         
 
-        loss, reward_loggings = self.cal_loss(logits_batch, relevant_idx_batch)
-        # loss, reward_loggings = self.cal_loss_multi_cat(attn_logits_batch, graph_batch.scores)
+        loss, reward_loggings = self.cal_loss(logits_batch, relevant_idx_batch, relevant_idx_in_path_batch, epoch=epoch)
         # TODO: new version
-        # loss, reward_loggings = self.cal_loss_with_weights(attn_logits_batch, relevant_idx_batch, hard_idx_batch)
+        # loss, reward_loggings = self.cal_loss_with_weights(logits_batch, relevant_idx_batch, hard_idx_batch_)
         return loss, reward_loggings
 
     def sampling_v3(self, tensor, training=False, K=6):
@@ -298,6 +298,66 @@ def remove_duplicates(input_list):
             result.append(item)
             seen.add(item)
     return result
+
+def reorganize(all_triplets, q_entities, select_idx, logits, max_len=2, budget=100):
+    with_topics, non_topics = [], []
+    for idx in select_idx:
+        triple = all_triplets[idx]
+        if triple[0] in q_entities or triple[-1] in q_entities:
+            with_topics.append(triple)
+        else:
+            non_topics.append(triple)
+    
+    G = build_graphs(all_triplets)
+
+    detected_paths = []
+ 
+    for i in with_topics:
+        for j in non_topics:
+            s, t = (i[-1], j[0]) if i[0] in q_entities else (j[-1], i[0])
+            start, end = ([i], [j]) if i[0] in q_entities else ([j], [i])
+            if s == t:
+                detected_paths.append(start + end)
+                continue
+            try:
+                paths_q_a = gen_path(G, s, t)
+            except:
+                paths_q_a = []
+            if not paths_q_a or len(paths_q_a[0]) > max_len:
+                continue
+            paths_q_a = [start + p + end for p in paths_q_a]
+            detected_paths.extend(paths_q_a)
+
+    def score(lst, all_triplets, logits):
+        logit_values = logits[[all_triplets.index(k) for k in lst]]
+        return -logit_values.std().item()
+
+    detected_paths = sorted(detected_paths, 
+                            key=lambda lst: score(lst, all_triplets, logits), 
+                            reverse=True)
+    detected_triplets = [all_triplets.index(item) for path in detected_paths for item in path]
+    # detected_triplets = remove_duplicates(detected_triplets)
+    detected_triplets = detected_triplets[:budget]
+
+    return detected_triplets
+
+                
+def build_graphs(all_triplets):
+    G = nx.DiGraph()
+    for (a, b, c) in all_triplets:
+        G.add_node(a)
+        G.add_node(c)
+        G.add_edge(a, c, relation=b)
+    return G
+
+def gen_path(G, source, target):
+    shortest_paths = nx.all_shortest_paths(G, source=source, target=target)
+    all_triplets_in_path = []
+    for path in shortest_paths:
+        triplets_in_path = [(path[i], G[path[i]][path[i+1]]['relation'], path[i+1]) for i in range(len(path) - 1)]
+        all_triplets_in_path.append(triplets_in_path)
+    return all_triplets_in_path
+
 
 def get_avg_ranks(all_triples, sorted_indices, ans_list):
     ranks = []
