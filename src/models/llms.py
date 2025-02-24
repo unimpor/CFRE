@@ -23,14 +23,24 @@ class LLMs(nn.Module):
         self.model_name = config["llm_model_name_or_path"]
         self.data_name = config["data_name"]
         self.cot_mode = config["cot"]
+        self.fast_thinking = config["fast_thinking"]
         # prompt config
         print(config["frequency_penalty"])
-        self.system_prompt = SYS_PROMPT
-        self.icl_prompt = [(ICL_USER_PROMPT, ICL_ASS_PROMPT), 
-                           (ICL_USER_PROMPT_2, ICL_ASS_PROMPT_2),
-                           (ICL_USER_PROMPT_3, ICL_ASS_PROMPT_3)
-                           ]
-        if "gpt" not in self.model_name:
+        if not self.fast_thinking:
+            self.system_prompt = SYS_PROMPT
+            # self.icl_prompt = [(ICL_USER_PROMPT, ICL_ASS_PROMPT), 
+            #                 (ICL_USER_PROMPT_2, ICL_ASS_PROMPT_2),
+            #                 (ICL_USER_PROMPT_3, ICL_ASS_PROMPT_3)
+            #                 ]
+            self.icl_prompt = []
+        else:
+            self.system_prompt = SYS_PROMPT_brief_path_level_inf
+            # self.icl_prompt = [(ICL_USER_PROMPT, ICL_ASS_PROMPT_brief), 
+            #                 (ICL_USER_PROMPT_2, ICL_ASS_PROMPT_2_brief),
+            #                 (ICL_USER_PROMPT_3, ICL_ASS_PROMPT_3_brief)
+            #                 ]
+            self.icl_prompt = [(ICL_USER_PROMPT_path_level_inf, ICL_ASS_PROMPT_brief_path_level_inf)]
+        if "Llama" in self.model_name:
             client = LLM(model=self.model_name, 
                          tensor_parallel_size=config["tensor_parallel_size"], 
                          max_seq_len_to_capture=config["max_seq_len_to_capture"],
@@ -56,9 +66,18 @@ class LLMs(nn.Module):
         """
         Generation conversation given a query-triplet pair.
         """
-        if "reverse" in self.prompt_mode:
-            triplets_or_paths.reverse()
-        triplet_prompt = "Triplets:\n" + "\n".join(triplets_or_paths)
+        # triplet level prompt
+        # triplet_prompt = "Triplets:\n" + "\n".join(triplets_or_paths)
+
+        # path level prompt
+        formatted_paths = []
+        for i, path in enumerate(triplets_or_paths):
+            formatted_path = f"{i}. "
+            # Join each triple as a string and separate them by commas
+            formatted_path += ', '.join([str(triplet) for triplet in path])
+            formatted_paths.append(formatted_path)
+
+        triplet_prompt = "Paths:\n" + "\n".join(formatted_paths)
         
         question_prompt = "Question:\n" + query
         if question_prompt[-1] != '?':
@@ -67,7 +86,7 @@ class LLMs(nn.Module):
         hint_prompt = "Hints:\n" + "\n".join(hints)
         
         user_query = "\n\n".join([triplet_prompt, question_prompt, hint_prompt])
- 
+        # user_query = "\n\n".join([triplet_prompt, question_prompt])
         return self.pack_prompt(user_query)                
 
     def pack_prompt(self, user_query):
@@ -87,7 +106,7 @@ class LLMs(nn.Module):
         return conversation
 
     def llm_inf(self, messages):
-        if "gpt" not in self.model_name:
+        if "Llama" in self.model_name:
             # batch version for llama
             outputs = self.llm(messages=messages)
             return [output.outputs[0].text for output in outputs]
@@ -114,7 +133,7 @@ class LLMs(nn.Module):
 
     def forward(self, query_batch, hint_batch, triplet_or_path_batch):
         
-        if "gpt" not in self.model_name:
+        if "Llama" in self.model_name:
             conversation_batch = [self.generate_prompt(q,a,t) for q, a, t in zip(query_batch, hint_batch, triplet_or_path_batch)]
             return self.llm_inf(conversation_batch)
         
@@ -137,11 +156,11 @@ class LLMs_Ret_Paths(LLMs):
         super().__init__(config)
         self.system_prompt = SYS_PROMPT_PATH
         self.icl_prompt = []
-        if "gpt" not in self.model_name:
-            self.icl_prompt = [(ICL_USER_PROMPT_PATH_0, ICL_ASS_PROMPT_PATH_0_brief),
-                               (ICL_USER_PROMPT_PATH_1, ICL_ASS_PROMPT_PATH_1_brief),
-                               (ICL_USER_PROMPT_PATH_2, ICL_ASS_PROMPT_PATH_2_brief),
-                               (ICL_USER_PROMPT_PATH_3, ICL_ASS_PROMPT_PATH_3_brief),
+        if "Llama" in self.model_name:
+            self.icl_prompt = [(ICL_USER_PROMPT_PATH_0, ICL_ASS_PROMPT_PATH_0),
+                               (ICL_USER_PROMPT_PATH_1, ICL_ASS_PROMPT_PATH_1),
+                               (ICL_USER_PROMPT_PATH_2, ICL_ASS_PROMPT_PATH_2),
+                               (ICL_USER_PROMPT_PATH_3, ICL_ASS_PROMPT_PATH_3),
                                ]
 
         self.level = "path"
@@ -171,7 +190,7 @@ class LLMs_Ret_Paths(LLMs):
             user_query = "\n\n".join([triplet_or_path_prompt, question_prompt, answer_prompt])
             messages_batch.append(self.pack_prompt(user_query))
         
-        if "gpt" not in self.model_name:
+        if "Llama" in self.model_name:
             response_batch = self.llm_inf(messages=messages_batch)
         else:
             response_batch = [self.llm_inf(messages=messages) for messages in messages_batch]
