@@ -77,6 +77,30 @@ Japan
 Phoenix Islands
 """
 
+ICL_ASS_PROMPT_3_brief = """ans: Kiribati
+"""
+
+ICL_USER_PROMPT_path_level_inf = """Paths:
+0. ('The Baltimore Fight Song', 'sports.fight_song.sports_team', 'Baltimore Ravens'), ('Baltimore Ravens', 'sports.sports_team.championships', 'Super Bowl XLVII')
+1. ('Super Bowl XLVII', 'sports.sports_championship_event.champion', 'Baltimore Ravens'), ('Baltimore Ravens', 'sports.sports_team.fight_song', 'The Baltimore Fight Song')
+2. ('The Baltimore Fight Song', 'sports.fight_song.sports_team', 'Baltimore Ravens'), ('Baltimore Ravens', 'sports.sports_team.championships', 'Super Bowl XXXV')
+3. ('Super Bowl XXXV', 'sports.sports_championship_event.champion', 'Baltimore Ravens'), ('Baltimore Ravens', 'sports.sports_team.fight_song', 'The Baltimore Fight Song')
+
+
+Question:
+What year did the team with Baltimore Fight Song win the Superbowl?
+
+
+Hints:
+The Baltimore Fight Song
+Superbowl
+"""
+
+
+ICL_ASS_PROMPT_brief_path_level_inf = """ans: Super Bowl XXXV
+ans: Super Bowl XLVII
+"""
+
 
 ICL_ASS_PROMPT_3 = """To determine what country Japan exports to that contains the Phoenix Islands, we will focus on the hints provided: "Japan" and "Phoenix Islands." 
 
