@@ -301,7 +301,7 @@ def remove_duplicates(input_list):
             seen.add(item)
     return result
 
-def reorganize(all_triplets, q_entities, select_idx, logits, max_len=2, budget=100):
+def reorganize(all_triplets, q_entities, select_idx, logits, three_hops=True, budget=100):
     with_topics, non_topics = [], []
     for idx in select_idx:
         triple = all_triplets[idx]
@@ -325,7 +325,7 @@ def reorganize(all_triplets, q_entities, select_idx, logits, max_len=2, budget=1
                 continue
     
     non_topics = [i for i in non_topics if i not in visited]
-    detected_paths_three_hops, visited = [], []
+    detected_paths_three_hops, detected_paths_four_hops = [], []
 
     # () [(), ()]
     for i in non_topics:
@@ -334,29 +334,23 @@ def reorganize(all_triplets, q_entities, select_idx, logits, max_len=2, budget=1
             start, end =  ([i], j) if j[-1][-1] in q_entities else (j, [i])
             if s == t:
                 detected_paths_three_hops.append(start + end)
-                visited.append(j)
-
     # detected_paths = [i for i in detected_paths if i not in visited]
 
     def score(lst, all_triplets, logits):
         logit_values = logits[[all_triplets.index(k) for k in lst]]
         return logit_values.mean().item()
 
+    detected_paths = detected_paths + detected_paths_three_hops
+
     detected_paths = sorted(detected_paths, 
                             key=lambda lst: score(lst, all_triplets, logits), 
                             reverse=True)
-    
-    detected_paths_three_hops = sorted(detected_paths_three_hops,
-                                       key=lambda lst: score(lst, all_triplets, logits),
-                                       reverse=True)
-
-    detected_paths = detected_paths + detected_paths_three_hops
     detected_paths = [p for p in detected_paths if not (p[0][0].startswith('m.') or p[0][0].startswith('g.') or p[-1][-1].startswith('m.') or p[-1][-1].startswith('g.'))]
 
     # triplet level
     detected_triplets = [all_triplets.index(item) for path in detected_paths for item in path]
     detected_triplets.extend([i for i in select_idx if i not in detected_triplets])
-    return detected_triplets[:len(select_idx)]
+    return detected_triplets[:max(len(select_idx), budget)]
 
     # TODO: Path level
     # detected_triplets = [item for path in detected_paths for item in path]
@@ -410,4 +404,12 @@ def get_avg_ranks(all_triples, sorted_indices, ans_list):
     # order 2. scattered topics + detected + scattered non-topics
     # with_topics = [i for i in select_idx if (i not in detected_triplets) and (all_triplets[i] in with_topics)]
     # non_topics = [i for i in select_idx if (i not in detected_triplets) and (all_triplets[i] in non_topics)]
+    
     # detected_triplets = detected_triplets + with_topics
+        # detected_paths = sorted(detected_paths, 
+    #                         key=lambda lst: score(lst, all_triplets, logits), 
+    #                         reverse=True)
+    
+    # detected_paths_three_hops = sorted(detected_paths_three_hops,
+    #                                    key=lambda lst: score(lst, all_triplets, logits),
+    #                                    reverse=True)
