@@ -8,8 +8,9 @@ from itertools import chain
 from torch_geometric.data.data import Data
 import networkx as nx
 import matplotlib.pyplot as plt
-from src.utils import print_log, remove_duplicates
+from src.utils import print_log, remove_duplicates, match
 from copy import deepcopy
+import time
 
 
 class RetrievalDataset:
@@ -17,13 +18,16 @@ class RetrievalDataset:
     load retrieval results and post-processing
     """
 
-    def __init__(self, config, split, opath=None, **kwargs):
+    def __init__(self, config, split, **kwargs):
         self.split = split
         self.config = config
         self.root = config['root']
         self.data_name = config['name']
-        self.post_filter = True  # filter bad samples.
-        self.oracle_path = opath
+        self.post_filter = False  # filter bad samples.
+
+        self.oracle_path = kwargs.get("opath", None)
+        self.hard_path = kwargs.get("hpath", None)
+
         self.training = kwargs.get("training", True)
         # self.version = kwargs.get("version", None)  # tmp arg  
         # if self.version in ["path", "triplet", "relation"]:
@@ -32,8 +36,8 @@ class RetrievalDataset:
         raw_data = self._load_data(opj(self.root, self.data_name, "processed", f"{self.split}.pkl"))
         # embs = self._load_emb()
         # scored_data = self._load_data(opj(self.root, self.data_name, "processed", f"{self.data_name}_241028_{self.split}.pth"))
-        
         self.processed_data = self.process(raw_data, )
+
 
     @property
     def processed_file_names(self):
@@ -41,13 +45,16 @@ class RetrievalDataset:
         return opj(self.root, self.data_name, "processed", filename)
 
     def process(self, raw_data, ):
+        num = 0
         embs = self._load_emb()
         if self.training:
             shortest_paths_cache = torch.load("datasets/cwq/processed/shortest_path.pth")
             oracle_paths_cache = torch.load(self.oracle_path)
-            # TODO: hard paths cache ??
+            if self.hard_path:
+                hard_paths_cache = torch.load(self.hard_path)
         # only for the need of test
-        filtering_id = torch.load("datasets/cwq/processed/test_filtering_bad_ids.pth") + torch.load("datasets/cwq/processed/test_filtering_bad_ids2.pth")
+        if self.split == "test":
+            filtering_id = torch.load("datasets/cwq/processed/test_filtering_bad_ids.pth") + torch.load("datasets/cwq/processed/test_filtering_bad_ids2.pth")
         processed_data = []
         for sample in raw_data:
             sample_id = sample['id']
@@ -69,6 +76,7 @@ class RetrievalDataset:
             #     # oracle_paths = [path for (path, s) in zip(shortest_paths, dat) if s == target]
             #     oracle_paths = [path for (path, s) in zip(shortest_paths, dat) if s in [0,1]]
             oracle_paths = dat
+            hard_negatives_paths, hard_positive_paths = [], []
 
             all_entities = sample["text_entity_list"] + sample["non_text_entity_list"]
             all_relations = sample["relation_list"]
@@ -87,13 +95,30 @@ class RetrievalDataset:
                                       torch.tensor(t_id_list)], axis=0)
             edge_attr = sample_embd['relation_embs'][r_id_list]
             
-            # shortest_path_idx = [all_triplets.index(item[:3]) for item in sample_scored['target_relevant_triples']]
-            shortest_path_idx = [all_triplets.index(item) for path in shortest_paths for item in path]
-            shortest_path_idx = remove_duplicates(shortest_path_idx)
+            if self.training and self.hard_path:
+                hard_negatives = get_hard_answers(all_entities, hard_paths_cache[sample_id]['not_prec'])
+                # assert hard neg not intersected with ans
+                hard_negatives = [i for i in hard_negatives if i not in sample["a_entity"]]
+                # assert len(set(hard_negatives) & set(sample["a_entity"])) == 0
+                hard_negatives_paths = get_paths(all_triplets, sample["q_entity"], hard_negatives)
+                # hard_positive_paths = get_pos_paths(oracle_paths, hard_paths_cache[sample_id]['missing'])
+
+            def path2tid(all_t, all_p):
+                return remove_duplicates([all_t.index(item) for path in all_p for item in path])
             
-            oracle_path_idx = [all_triplets.index(item) for path in oracle_paths for item in path]
-            oracle_path_idx = remove_duplicates(oracle_path_idx)
-            
+            shortest_path_idx = path2tid(all_triplets, shortest_paths)
+            oracle_path_idx = path2tid(all_triplets, oracle_paths)
+            hard_neg_path_idx = path2tid(all_triplets, hard_negatives_paths)
+
+            # if len(set(oracle_path_idx) & set(hard_neg_path_idx)) > 0:
+            #     print(len(set(oracle_path_idx) & set(hard_neg_path_idx)))
+            #     num += 1
+
+            hard_pos_path_idx = path2tid(all_triplets, hard_positive_paths)
+
+            # shortest_path_idx = [all_triplets.index(item) for path in shortest_paths for item in path]
+            # shortest_path_idx = remove_duplicates(shortest_path_idx)
+
             # map {-1, 0, 1} in shortest path to {1, 2, 3} 
             scores = -torch.ones(len(all_triplets))
             # for path, score in zip(shortest_paths, dat):
@@ -110,12 +135,16 @@ class RetrievalDataset:
                 "q_entity": [all_entities[idx] for idx in sample["q_entity_id_list"]],
                 "triplets": all_triplets,
                 "relevant_idx": oracle_path_idx,
+                "relevant_idx_in_path": [[all_triplets.index(item) for item in path] for path in oracle_paths],
                 "shortest_path_idx": shortest_path_idx,
+                "hard_idx": hard_neg_path_idx + hard_pos_path_idx,
                 "y": sample["a_entity"],
                 "graph": Data(x=x, scores=scores, edge_attr=edge_attr, edge_index=edge_index.long(), topic_signal=topic_entity_one_hot.float())
             }
             assert processed_sample["graph"].topic_signal.shape[0] == processed_sample["graph"].x.shape[0]
             processed_data.append(processed_sample)
+        # print(num)
+        # input("suncc")
         return processed_data
 
     def _load_data(self, file_path):
@@ -190,12 +219,6 @@ class RetrievalDataset:
                 triples_path.append(triple_id_i_list)
 
             path_list.append(triples_path)
-
-        # num_triples = len(sample['h_id_list'])
-        # triple_scores = self._score_triples(
-        #     path_list,
-        #     num_triples
-        # )
         
         return path_list
 
@@ -423,3 +446,71 @@ def split_samples(processed_samples):
     return new_samples
 
 
+def get_hard_answers(all_entities, ans_list):
+    ans_list_ = []
+    for a in ans_list:
+        a = a.split('ans:')[-1]
+        for e in all_entities:
+            if match(a, e) or match(e, a) or match(e, a.split('ans:')[-1].strip()):
+                ans_list_.append(e)
+                break
+    if len(ans_list_) < len(ans_list):
+        print("abnormal.")
+    return remove_duplicates(ans_list_)
+
+
+def get_paths(all_triplets, q_list, a_list):
+    if len(a_list) == 0:
+        return []
+    # build graph
+    G = nx.DiGraph()
+    for (a, b, c) in all_triplets:
+        G.add_node(a)
+        G.add_node(c)
+        G.add_edge(a, c, relation=b)
+    # Find shortest
+    all_paths = []
+    for q in q_list:
+        for a in a_list:
+            paths_q_a = _shortest_path(G, q, a)
+            if len(paths_q_a) > 0:
+                all_paths.extend(paths_q_a)
+    return all_paths
+
+
+def gen_path(G, source, target):
+    shortest_paths = nx.all_shortest_paths(G, source=source, target=target)
+    all_triplets_in_path = []
+    for path in shortest_paths:
+        triplets_in_path = [(path[i], G[path[i]][path[i+1]]['relation'], path[i+1]) for i in range(len(path) - 1)]
+        all_triplets_in_path.append(triplets_in_path)
+    return all_triplets_in_path
+
+
+def _shortest_path(nx_g, q, a):
+
+    try:
+        forward_paths = gen_path(nx_g, q, a)
+    except:
+        forward_paths = []
+    
+    try:
+        backward_paths = gen_path(nx_g, a, q)
+    except:
+        backward_paths = []
+    
+    full_paths = forward_paths + backward_paths
+    if (len(forward_paths) == 0) or (len(backward_paths) == 0):
+        return full_paths
+    
+    min_path_len = min([len(path) for path in full_paths])
+    refined_paths = []
+    for path in full_paths:
+        if len(path) == min_path_len:
+            refined_paths.append(path)
+    
+    return refined_paths
+
+def get_pos_paths(all_paths, ans):
+    all_paths = [item for item in all_paths if item != []]
+    return [path for path in all_paths if path[0][0] in ans or path[-1][-1] in ans]

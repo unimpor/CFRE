@@ -28,18 +28,19 @@ class LLMs(nn.Module):
         print(config["frequency_penalty"])
         if not self.fast_thinking:
             self.system_prompt = SYS_PROMPT
-            # self.icl_prompt = [(ICL_USER_PROMPT, ICL_ASS_PROMPT), 
-            #                 (ICL_USER_PROMPT_2, ICL_ASS_PROMPT_2),
-            #                 (ICL_USER_PROMPT_3, ICL_ASS_PROMPT_3)
-            #                 ]
-            self.icl_prompt = []
+            self.icl_prompt = [(ICL_USER_PROMPT, ICL_ASS_PROMPT), 
+                            (ICL_USER_PROMPT_2, ICL_ASS_PROMPT_2),
+                            (ICL_USER_PROMPT_3, ICL_ASS_PROMPT_3)
+                            ]
+            # self.icl_prompt = []
         else:
-            self.system_prompt = SYS_PROMPT_brief_path_level_inf
-            # self.icl_prompt = [(ICL_USER_PROMPT, ICL_ASS_PROMPT_brief), 
-            #                 (ICL_USER_PROMPT_2, ICL_ASS_PROMPT_2_brief),
-            #                 (ICL_USER_PROMPT_3, ICL_ASS_PROMPT_3_brief)
-            #                 ]
-            self.icl_prompt = [(ICL_USER_PROMPT_path_level_inf, ICL_ASS_PROMPT_brief_path_level_inf)]
+            self.system_prompt = SYS_PROMPT_brief
+            self.icl_prompt = [(ICL_USER_PROMPT, ICL_ASS_PROMPT_brief), 
+                            (ICL_USER_PROMPT_2, ICL_ASS_PROMPT_2_brief),
+                            (ICL_USER_PROMPT_3, ICL_ASS_PROMPT_3_brief)
+                            ]
+            # self.system_prompt = SYS_PROMPT_brief_path_level_inf
+            # self.icl_prompt = [(ICL_USER_PROMPT_path_level_inf, ICL_ASS_PROMPT_brief_path_level_inf)]
         if "Llama" in self.model_name:
             client = LLM(model=self.model_name, 
                          tensor_parallel_size=config["tensor_parallel_size"], 
@@ -62,22 +63,34 @@ class LLMs(nn.Module):
                                temperature=config["temperature"], 
                                max_tokens=1000)
     
+    def initialize_prompt_template(self, ):
+        if not self.fast_thinking:
+            self.system_prompt = SYS_PROMPT
+            self.icl_prompt = [(ICL_USER_PROMPT, ICL_ASS_PROMPT), 
+                            (ICL_USER_PROMPT_2, ICL_ASS_PROMPT_2),
+                            (ICL_USER_PROMPT_3, ICL_ASS_PROMPT_3)
+                            ]
+        else:
+            self.system_prompt = SYS_PROMPT_brief
+            self.icl_prompt = [(ICL_USER_PROMPT, ICL_ASS_PROMPT_brief), 
+                            (ICL_USER_PROMPT_2, ICL_ASS_PROMPT_2_brief),
+                            (ICL_USER_PROMPT_3, ICL_ASS_PROMPT_3_brief)
+                            ]
+    
     def generate_prompt(self, query, hints, triplets_or_paths):
         """
         Generation conversation given a query-triplet pair.
         """
         # triplet level prompt
-        # triplet_prompt = "Triplets:\n" + "\n".join(triplets_or_paths)
+        triplet_prompt = "Triplets:\n" + "\n".join(triplets_or_paths)
 
         # path level prompt
-        formatted_paths = []
-        for i, path in enumerate(triplets_or_paths):
-            formatted_path = f"{i}. "
-            # Join each triple as a string and separate them by commas
-            formatted_path += ', '.join([str(triplet) for triplet in path])
-            formatted_paths.append(formatted_path)
-
-        triplet_prompt = "Paths:\n" + "\n".join(formatted_paths)
+        # formatted_paths = []
+        # for i, path in enumerate(triplets_or_paths):
+        #     formatted_path = f"{i}. "
+        #     formatted_path += ', '.join([str(triplet) for triplet in path])
+        #     formatted_paths.append(formatted_path)
+        # triplet_prompt = "Paths:\n" + "\n".join(formatted_paths)
         
         question_prompt = "Question:\n" + query
         if question_prompt[-1] != '?':

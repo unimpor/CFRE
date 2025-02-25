@@ -26,6 +26,8 @@ Caribbean
 Dutch Language
 """
 
+ICL_ASS_PROMPT_2_brief = """ans: Netherlands Antilles
+"""
 
 ICL_ASS_PROMPT_2 = """To find the countries in the Caribbean that have Dutch Language as an official language, taking into account the hints, we will look for triplets that link countries to the location 'Caribbean' and also link countries to 'Dutch Language' as their official language.
 
@@ -156,6 +158,10 @@ Hints:
 Lou Seal
 """
 
+ICL_ASS_PROMPT_brief = """ans: 2014 (2014 World Series)
+ans: 2012 (2012 World Series)
+ans: 2010 (2010 World Series)
+"""
 
 ICL_ASS_PROMPT = """To find the year the team with mascot named Lou Seal won the World Series, we need to find the team with mascot named Lou Seal and then find the year they won the World Series.
 
@@ -185,37 +191,31 @@ ans: 2010 (2010 World Series)"""
 #     " Please return your answer as a list, with each valid response prefixed with 'ans:'."
 #     # For example, if the question asks about a country's official language, check for a triplet like ('Country', 'location.country.official_language', 'Language') and use it to form your answer.
 # )
+
+SYS_PROMPT_brief = (
+"Based solely on the provided triplets, please answer the question. Pay special attention to the following:"
+" 1. You will be provided with hints containing a list of entities which are extracted from the question. When answering the question, prioritize considering triplets that explicitly mention these entities. This will help you focus on relevant context for generating the most accurate response."
+" 2. If the triplet you identify links the hint entity to an abstract identifier like 'm.0hpny13', simply look for other triplets involving this abstract entity, as it often acts as a bridge connecting the question entities to the answer." 
+" 3. When answering the question, only use the information provided in the triplets. Do not rely on your inherent knowledge. Only the entities, relationships, and facts in the triplets are allowed to be used in your reasoning process."
+" 4. You only need to return your answer(s), each on a new line and prefixed with 'ans:'. If no answers are found from the given triplets, simply return 'ans: Not available'."
+)
+
+SYS_PROMPT_brief_path_level_inf = (
+"You are given a question along with several reasoning paths. Each path contains one or more triplets that are linked end-to-end."
+" Based solely on information of the provided paths, please answer the question. Pay special attention to the following:"
+" 1. You should combine multiple relevant paths to the question context in order to make a precise answer(s)."
+" 2. You will be provided with hints that list entities which are extracted from the question. When answering, prioritize paths that explicitly mention these entities."
+# " 2. If the triplet you identify links the hint entity to an abstract identifier like 'm.0hpny13', simply look for other triplets involving this abstract entity, as it often acts as a bridge connecting the question entities to the answer." 
+" 3. Only use the information available in the reasoning paths to form your answer. Do not rely on your inherent knowledge. Your reasoning should be based solely on the entities, relationships, and facts present in the paths."
+" 4. You only need to return the answer(s), each on a new line and prefixed with 'ans:'. If no answer can be derived from the given paths, simply return 'ans: Not available'."
+)
+
 SYS_PROMPT = (
 "Based solely on the provided triplets, please answer the question. Pay special attention to the following:"
 " 1. You will be provided with hints containing a list of entities which are extracted from the question. When answering the question, prioritize considering triplets that explicitly mention these entities. This will help you focus on relevant context for generating the most accurate response."
 " 2. If the triplet you identify links the hint entity to an abstract identifier like 'm.0hpny13', simply look for other triplets involving this abstract entity, as it often acts as a bridge connecting the question entities to the answer." 
 " 3. When answering the question, only use the information provided in the triplets. Do not rely on your inherent knowledge. Only the entities, relationships, and facts in the triplets are allowed to be used in your reasoning process."
-" 4. Return your answer(s) as a list, with each prefixed with 'ans:'."
-
-
-# For example:
-# - If a triplet says 'Entity A' is located in 'Entity B', you can only infer the relationship between 'Entity A' and 'Entity B' based on that triplet.
-# - If a triplet says 'Entity C' speaks 'Language X', you can only consider that relationship without assuming other knowledge about 'Entity C' or 'Language X'.
-
-# In other words, **do not make any assumptions** or bring in information outside of the provided triplets. Only the entities, relationships, and facts in the triplets are allowed to be used in your reasoning process.
-
-
-
-# " For example, for the triplet ('Russell', 'people.person.education', 'm.0hpny13'), you can find ('m.0hpny13', 'education.education.institution', 'Georgia Tech') to connect Russell to Georgia Tech."
-
-# " Here are the steps to follow:"
-# " 1. Identify all entities that are mentioned in the question, such as countries or languages."
-# " 2. Find the relevant triplets from the given triplets that correspond to these entities as required in the question."
-# # 3. For the part of the question that refers to "Caribbean", search for triplets that include the location "Caribbean" (e.g., ('Country', 'location.location.containedby', 'Caribbean')).
-# # 4. For the part of the question that refers to "Dutch Language", search for triplets that link countries to "Dutch Language" as their official language (e.g., ('Country', 'location.country.official_language', 'Dutch Language')).
-# " 3. After identifying relevant triplets for all elements, combine the information to get the final answer."
-# " 4. Please return your answer(s) as a list, with each prefixed with 'ans:'."
-
-# " For example, if the question asks about countries in the Caribbean that have Dutch as an official language, you should:\n"
-
-# "1. For the part of the question that refers to 'Caribbean', search for triplets that link countries to the location 'Caribbean', e.g., ('Country', 'location.location.containedby', 'Caribbean').\n"
-# "2. For the part of the question that refers to 'Dutch Language', search for triplets that link countries to 'Dutch Language' as their official language, e.g., ('Country', 'location.country.official_language', 'Dutch Language').\n"
-# "3. After identifying the relevant triplets for both concepts ('Caribbean' and 'Dutch Language'), find the intersection of the two sets of countries mentioned in these triplets."
+" 4. After thinking, return your answer(s), each on a new line and prefixed with 'ans:', like 'ans: A'. If no answers are found from the given triplets, return 'ans: Not available'."
 )
 
 
@@ -233,11 +233,11 @@ SYS_PROMPT_PATH_old = (
     " Pay attention that if the question involves multiple entities or relationships that span across different paths, identify all relevant paths and combine them together."
     # " If the question involves multiple entities or relationships that are spread across different paths, identify all such paths and combine them together."
     # " Pay special attention to ensuring that all critical concepts, including specific entities (e.g., people, dates, locations) and relationships (e.g., geographical, hierarchical, temporal), are fully represented in the selected paths."
-    " Return the number of all identified paths as a list, each prefixed with 'ans:'."
+    " Return all identified paths, each on a new line and prefixed with 'ans:', e.g., 'ans: Path 0'."
     # " If you need to combine information from multiple paths to answer the question, include all relevant paths that contribute to the answer."
     # assessment of detection
-    " Once the paths are identified, assess whether they sufficiently cover all entities and relationships in the question."
-    " If they do, append 'sign: STOP' to your answer. If any entity or relationship is missing, append 'sign: CONTINUE' to your answer."
+   #  " Once the paths are identified, assess whether they sufficiently cover all entities and relationships in the question."
+   #  " If they do, append 'sign: STOP' to your answer. If any entity or relationship is missing, append 'sign: CONTINUE' to your answer."
 )
 
 SYS_PROMPT_PATH_old1 = (

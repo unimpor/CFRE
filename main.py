@@ -185,10 +185,10 @@ def main():
     if args.mode == "inference":
         to_preserve = inference(cfre, test_loader, log_dir)
         # double check
-        
         test_set = [dat for dat in test_set if dat["id"] in to_preserve]
-        test_loader = DataLoader(test_set, batch_size=4, shuffle=False, collate_fn=collate_fn)
+        test_loader = DataLoader(test_set, batch_size=1, shuffle=False, collate_fn=collate_fn)
         cfre.llms.fast_thinking = False
+        cfre.llms.initialize_prompt_template()
         _ = inference(cfre, test_loader, log_dir)
 
         exit(0)
