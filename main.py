@@ -19,10 +19,10 @@ import random
 sys.stdout.reconfigure(encoding='utf-8')
 
 
-def inference(cfre, test_loader, log_dir):
+def inference(cfre, test_loader, log_dir, ):
     loggings = opj(log_dir, "logging.txt")
     K = cfre.K
-    all_loss_dict_val = {}
+    all_loss_dict_val, to_preserve = {}, []
     with torch.no_grad():
         for batch in tqdm(test_loader):
             _, loss_dict = cfre.inference(batch, opj(log_dir, f"logging-inference-ret-{K}.txt"))
@@ -33,7 +33,15 @@ def inference(cfre, test_loader, log_dir):
             all_loss_dict_val[k] = np.mean(v)
         
     write_log(f"Test-Inference-Retrieval-{K}" + str(all_loss_dict_val), loggings)
+    
+    for k, v in cfre.evaluation.items():
+        gen = v['gen']
+        if 'ans:' not in gen.lower() or "ans: not available" in gen.lower() or "ans: no information available" in gen.lower():
+            to_preserve.append(k)
+
     torch.save(cfre.evaluation, opj(log_dir, f"inference-ret-{K}.pth"))
+
+    return to_preserve
 
     
 def train(num_epochs, patience, cfre, train_loader, val_loader, optimizer, log_dir, warmup=True, **kwargs):
@@ -101,15 +109,22 @@ def main():
     parser.add_argument('--version', type=str, default="path")
     parser.add_argument('--coeff1', type=float, default=0.1)
     parser.add_argument('--coeff2', type=float, default=0.1)
+    parser.add_argument('--gpu_util', type=float, default=0.95)
     parser.add_argument('--tau', type=float, default=1)
     parser.add_argument('--penalty', type=float, default=0.16)
     parser.add_argument('--ret_num', type=int, default=100)
+    parser.add_argument('--output_size', type=int, default=1)
     parser.add_argument('--start', type=int, default=0, help="start of the training epoch.")
     parser.add_argument('--algo', type=str, default="v2")
+    parser.add_argument('--reorder', action='store_true', help='reorder the triplets')
     parser.add_argument('--gumbel_strength', type=float, default=1)
-    parser.add_argument('--opath', type=str, default="")
+    parser.add_argument('--opath', type=str, default="paths storing oracle index")
+    parser.add_argument('--hpath', type=str, default=None)
     parser.add_argument('--comp', action='store_true', help='compliment version for test inference')
-
+    parser.add_argument('--retrieval', action='store_false', help='Use retrieval in inference.')
+    parser.add_argument('--weight', type=float, default=2.0)
+    parser.add_argument('--add_hard', action='store_true', help='Add hard samples.')
+    parser.add_argument('--fast_thinking', action='store_true', help='Fast thinking version inference')
 
     args = parser.parse_args()
     
@@ -121,6 +136,10 @@ def main():
     config['algorithm']['algo'] = args.algo
     config['algorithm']['gumbel_strength'] = args.gumbel_strength
     config['llms']['frequency_penalty'] = args.penalty
+    config['llms']['gpu_memory_utilization'] = args.gpu_util
+    config['llms']['fast_thinking'] = args.fast_thinking
+
+    config['retriever']['output_size'] = args.output_size
     if args.llm_model_name_or_path:
         config['llms']["llm_model_name_or_path"] = config["logging"]["llm"] = args.llm_model_name_or_path
     train_config = config['train']
@@ -133,34 +152,21 @@ def main():
     if llm_config["tensor_parallel_size"] == 1:
         os.environ["CUDA_VISIBLE_DEVICES"] = f"{args.device}"
         device = torch.device(f"cuda:0")
-
+    print(args.add_hard)
     proj_root = opj(log_config["root"], log_config["dataset"], log_config["llm"].split('/')[-1], log_config["ret"])
     log_dir = opj(proj_root, args.proj_name)
     os.makedirs(log_dir, exist_ok=True)
 
     set_seed(config['env']['seed'])
     llms = LLMs(llm_config)
-    # to_preserve = []               
-    # to_check = torch.load("logging/cwq/Meta-Llama-3.1-8B-Instruct/DDE/warmup_training_relation/evaluation_K50.pth")
-    # for k, v in to_check.items():
-    #     gen = v['gen']
-    #     if 'ans:' not in gen.lower() or "ans: not available" in gen.lower() or "ans: no information available" in gen.lower():
-    #         to_preserve.append(k)
+
     if args.mode == "inference":
-        test_set = RetrievalDataset(config=config["dataset"], split='test', )
-        if args.comp:
-            results = torch.load(opj(log_dir, f"inference-ret-{args.ret_num}.pth"))
-            bad_samples = [k for k,v in results.items() if 'ans:' not in v['gen'] or 'ans: None' in v['gen']]
-            test_set = [dat for dat in test_set if dat["id"] in bad_samples]
-        print(len(test_set))
+        test_set = RetrievalDataset(config=config["dataset"], split='test', training=False)
         test_loader = DataLoader(test_set, batch_size=4, shuffle=False, collate_fn=collate_fn)
     else:
-        train_set = RetrievalDataset(config=config["dataset"], split='train', opath=args.opath)
-        val_set = RetrievalDataset(config=config["dataset"], split='val', )
+        train_set = RetrievalDataset(config=config["dataset"], split='train', opath=args.opath, hpath=args.hpath)
+        val_set = RetrievalDataset(config=config["dataset"], split='val', training=False)
         print(len(train_set))
-        print(np.mean([len(dat["relevant_idx"]) for dat in train_set]),
-              np.mean([len(dat["shortest_path_idx"]) for dat in train_set]),)
-        # TODO: False to True
         train_loader = DataLoader(train_set, batch_size=train_config['batch_size'], shuffle=True, collate_fn=collate_fn, drop_last=False)
         val_loader = DataLoader(val_set, batch_size=train_config['batch_size'], shuffle=False, collate_fn=collate_fn)
 
@@ -169,21 +175,29 @@ def main():
         warmup_ckpt = torch.load(args.ckpt_path, map_location=device)
         ibtn.load_state_dict(warmup_ckpt['model_state_dict'])
     
-    cfre = RLRE(retriever=ibtn, llm_model=llms, config=config['algorithm'])
+    cfre = RLRE(retriever=ibtn, 
+                llm_model=llms, 
+                config=config['algorithm'], 
+                add_hard=args.add_hard, 
+                weight=args.weight,
+                reorder=args.reorder)
 
     if args.mode == "inference":
-        inference(cfre, test_loader, log_dir)
+        to_preserve = inference(cfre, test_loader, log_dir)
+        # double check
+        
+        test_set = [dat for dat in test_set if dat["id"] in to_preserve]
+        test_loader = DataLoader(test_set, batch_size=4, shuffle=False, collate_fn=collate_fn)
+        cfre.llms.fast_thinking = False
+        _ = inference(cfre, test_loader, log_dir)
+
         exit(0)
 
     # Set up Optimizer.
-    wp_optimizer = setup_wp_optimizer(cfre, warmup_config)
     optimizer = setup_tr_optimizer(cfre, train_config)   
     
     # Step 5. Training one epoch and batch
-    if args.proj_name == "warmup":
-        train(warmup_config["num_epochs"], warmup_config["patience"], cfre, train_loader, val_loader, wp_optimizer, log_dir, warmup=True)
-    else:
-        train(train_config["num_epochs"], train_config["patience"], cfre, train_loader, val_loader, optimizer, log_dir, warmup=False, start=args.start)
+    train(train_config["num_epochs"], train_config["patience"], cfre, train_loader, val_loader, optimizer, log_dir, warmup=False, start=args.start)
     
 if __name__ == '__main__':
     main()
