@@ -177,10 +177,11 @@ class RLRE(nn.Module):
 
             self.evaluation[dat_id] = {"select": select_idx}
             select_batch.append(select_idx)
-
-        # masked_triplets_batch, _ = self.mask_triplet(triplet_batch, select_batch)
-        # generation_batch = self.llms(question_batch, hints_batch, masked_triplets_batch)
-        generation_batch = self.llms(question_batch, hints_batch, select_batch)
+        # triplet level inference
+        masked_triplets_batch, _ = self.mask_triplet(triplet_batch, select_batch)
+        generation_batch = self.llms(question_batch, hints_batch, masked_triplets_batch)
+        # path level inferene
+        # generation_batch = self.llms(question_batch, hints_batch, select_batch)
         for dat_id, g in zip(id_batch, generation_batch):
             print_log(dat_id, logging)
             print_log(g, logging)
@@ -352,29 +353,24 @@ def reorganize(all_triplets, q_entities, select_idx, logits, max_len=2, budget=1
     detected_paths = detected_paths + detected_paths_three_hops
     detected_paths = [p for p in detected_paths if not (p[0][0].startswith('m.') or p[0][0].startswith('g.') or p[-1][-1].startswith('m.') or p[-1][-1].startswith('g.'))]
 
-            
     # triplet level
-    # detected_triplets = [all_triplets.index(item) for path in detected_paths for item in path]
-    # detected_triplets.extend([i for i in select_idx if i not in detected_triplets])
-    # return detected_triplets
+    detected_triplets = [all_triplets.index(item) for path in detected_paths for item in path]
+    detected_triplets.extend([i for i in select_idx if i not in detected_triplets])
+    return detected_triplets[:len(select_idx)]
 
     # TODO: Path level
-    detected_triplets = [item for path in detected_paths for item in path]
-    scattered_triplets = [[all_triplets[i]] for i in select_idx if all_triplets[i] not in detected_triplets]
-    detected_paths.extend(scattered_triplets)
+    # detected_triplets = [item for path in detected_paths for item in path]
+    # scattered_triplets = [[all_triplets[i]] for i in select_idx if all_triplets[i] not in detected_triplets]
+    # detected_paths.extend(scattered_triplets)
 
-    final_paths = []
-    triplets_budget = 0
-    for i in detected_paths:
-        final_paths.append(i)
-        triplets_budget += len(i)
-        if triplets_budget > len(select_idx):
-            break
-
-    # Do not remove dupblicated ones
-    # detected_triplets = remove_duplicates(detected_triplets)
-    # Clipping to original num
-    return final_paths
+    # final_paths = []
+    # triplets_budget = 0
+    # for i in detected_paths:
+    #     final_paths.append(i)
+    #     triplets_budget += len(i)
+    #     if triplets_budget > len(select_idx):
+    #         break
+    # return final_paths
 
 def build_graphs(all_triplets):
     G = nx.DiGraph()
