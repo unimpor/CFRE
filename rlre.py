@@ -22,23 +22,17 @@ class RLRE(nn.Module):
         self.llms = llm_model
         self.coeff1 = float(config['coeff1'])
         self.coeff2 = float(config['coeff2'])
-        self.algo = config["algo"]
         self.metrics_name = config["reward_metrics"]
         self.reward_metrics = RewardMetrics(self.metrics_name)
-        self.perturb_per_sample = config["perturb_per_sample"]  # Use 1. Not used in this method.
-        self.regularize = config["regularize"]
         self.K = config["ret_num"]
         self.evaluation = {}
+        # hard negatives
         self.add_hard = kwargs.get("add_hard", True)
-        self.reorder = kwargs.get("reorder", False)
-        self.eps = 1e-6  # for numerical stability
-        self.strategy = config["filtering"]
-        self.filter_num_or_ratio = config["filtering_num_or_ratio"]
-        self.gumbel_strength = float(config["gumbel_strength"])
-        self.tau = float(config["tau"])
-        self.update_num = 0
         self.weight = kwargs.get("weight", 1.0)
-        print(self.K, self.add_hard, self.weight)
+        # triplets arrangement
+        self.reorder = kwargs.get("reorder", False)
+        self.retrieval_clip = kwargs.get("clipping", False)
+        self.budget = kwargs.get("budget", 100)
         
     @property
     def device(self):
@@ -173,7 +167,7 @@ class RLRE(nn.Module):
             # if not retrieval:
             #     select_idx = shortest_path_idx_batch[i]
             if self.reorder:
-                select_idx = reorganize(triplet_batch[i], hints_batch[i], select_idx, attn_logit)
+                select_idx = self.reorganize(triplet_batch[i], hints_batch[i], select_idx, attn_logit)
 
             self.evaluation[dat_id] = {"select": select_idx}
             select_batch.append(select_idx)
@@ -292,6 +286,59 @@ class RLRE(nn.Module):
         return masked_triplets_batch, masked_attns_batch
         # return masked_token_ids
 
+    def reorganize(self, all_triplets, q_entities, select_idx, logits, ):
+        with_topics, non_topics = [], []
+        for idx in select_idx:
+            triple = all_triplets[idx]
+            if triple[0] in q_entities or triple[-1] in q_entities:
+                with_topics.append(triple)
+            else:
+                non_topics.append(triple)
+        
+        detected_paths, visited = [], []
+    
+        for i in with_topics:
+            for j in non_topics:
+                s, t = (i[-1], j[0]) if i[0] in q_entities else (j[-1], i[0])
+                start, end = ([i], [j]) if i[0] in q_entities else ([j], [i])
+                # s == t represents 2-hop neighbors from source.
+                if s == t:
+                    detected_paths.append(start + end)
+                    visited.extend(start + end)
+                    continue
+        
+        non_topics = [i for i in non_topics if i not in visited]
+        detected_paths_three_hops, detected_paths_four_hops = [], []
+
+        # () [(), ()]
+        for i in non_topics:
+            for j in detected_paths:
+                s, t = (i[-1], j[0][0]) if j[-1][-1] in q_entities else (j[-1][-1], i[0][0])
+                start, end =  ([i], j) if j[-1][-1] in q_entities else (j, [i])
+                if s == t:
+                    detected_paths_three_hops.append(start + end)
+        detected_paths = [i for i in detected_paths if i not in visited]
+
+        def score(lst, all_triplets, logits):
+            logit_values = logits[[all_triplets.index(k) for k in lst]]
+            return logit_values.mean().item()
+
+        detected_paths = detected_paths + detected_paths_three_hops
+
+        detected_paths = sorted(detected_paths, 
+                                key=lambda lst: score(lst, all_triplets, logits), 
+                                reverse=True)
+        detected_paths = [p for p in detected_paths if not (p[0][0].startswith('m.') or p[0][0].startswith('g.') or p[-1][-1].startswith('m.') or p[-1][-1].startswith('g.'))]
+
+        # triplet level
+        detected_triplets = [all_triplets.index(item) for path in detected_paths for item in path]
+        detected_triplets.extend([i for i in select_idx if i not in detected_triplets])
+        if self.retrieval_clip:
+            return detected_triplets[:max(len(select_idx), self.budget)]
+        else:
+            return detected_triplets
+
+
 def remove_duplicates(input_list):
     seen = set()
     result = []
@@ -300,71 +347,6 @@ def remove_duplicates(input_list):
             result.append(item)
             seen.add(item)
     return result
-
-def reorganize(all_triplets, q_entities, select_idx, logits, three_hops=True, budget=100):
-    with_topics, non_topics = [], []
-    for idx in select_idx:
-        triple = all_triplets[idx]
-        if triple[0] in q_entities or triple[-1] in q_entities:
-            with_topics.append(triple)
-        else:
-            non_topics.append(triple)
-    
-    # G = build_graphs(all_triplets)
-
-    detected_paths, visited = [], []
- 
-    for i in with_topics:
-        for j in non_topics:
-            s, t = (i[-1], j[0]) if i[0] in q_entities else (j[-1], i[0])
-            start, end = ([i], [j]) if i[0] in q_entities else ([j], [i])
-            # s == t represents 2-hop neighbors from source.
-            if s == t:
-                detected_paths.append(start + end)
-                visited.extend(start + end)
-                continue
-    
-    non_topics = [i for i in non_topics if i not in visited]
-    detected_paths_three_hops, detected_paths_four_hops = [], []
-
-    # () [(), ()]
-    for i in non_topics:
-        for j in detected_paths:
-            s, t = (i[-1], j[0][0]) if j[-1][-1] in q_entities else (j[-1][-1], i[0][0])
-            start, end =  ([i], j) if j[-1][-1] in q_entities else (j, [i])
-            if s == t:
-                detected_paths_three_hops.append(start + end)
-    # detected_paths = [i for i in detected_paths if i not in visited]
-
-    def score(lst, all_triplets, logits):
-        logit_values = logits[[all_triplets.index(k) for k in lst]]
-        return logit_values.mean().item()
-
-    detected_paths = detected_paths + detected_paths_three_hops
-
-    detected_paths = sorted(detected_paths, 
-                            key=lambda lst: score(lst, all_triplets, logits), 
-                            reverse=True)
-    detected_paths = [p for p in detected_paths if not (p[0][0].startswith('m.') or p[0][0].startswith('g.') or p[-1][-1].startswith('m.') or p[-1][-1].startswith('g.'))]
-
-    # triplet level
-    detected_triplets = [all_triplets.index(item) for path in detected_paths for item in path]
-    detected_triplets.extend([i for i in select_idx if i not in detected_triplets])
-    return detected_triplets[:max(len(select_idx), budget)]
-
-    # TODO: Path level
-    # detected_triplets = [item for path in detected_paths for item in path]
-    # scattered_triplets = [[all_triplets[i]] for i in select_idx if all_triplets[i] not in detected_triplets]
-    # detected_paths.extend(scattered_triplets)
-
-    # final_paths = []
-    # triplets_budget = 0
-    # for i in detected_paths:
-    #     final_paths.append(i)
-    #     triplets_budget += len(i)
-    #     if triplets_budget > len(select_idx):
-    #         break
-    # return final_paths
 
 def build_graphs(all_triplets):
     G = nx.DiGraph()
@@ -399,6 +381,21 @@ def get_avg_ranks(all_triples, sorted_indices, ans_list):
     if len(ans_list_) > 0:
         ranks += [len(sorted_indices)] * len(ans_list_)
     return -np.mean(ranks)
+
+
+    # TODO: Path level
+    # detected_triplets = [item for path in detected_paths for item in path]
+    # scattered_triplets = [[all_triplets[i]] for i in select_idx if all_triplets[i] not in detected_triplets]
+    # detected_paths.extend(scattered_triplets)
+
+    # final_paths = []
+    # triplets_budget = 0
+    # for i in detected_paths:
+    #     final_paths.append(i)
+    #     triplets_budget += len(i)
+    #     if triplets_budget > len(select_idx):
+    #         break
+    # return final_paths
 
 
     # order 2. scattered topics + detected + scattered non-topics

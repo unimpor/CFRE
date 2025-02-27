@@ -124,6 +124,9 @@ def main():
     parser.add_argument('--retrieval', action='store_false', help='Use retrieval in inference.')
     parser.add_argument('--weight', type=float, default=2.0)
     parser.add_argument('--add_hard', action='store_true', help='Add hard samples.')
+    parser.add_argument('--post_filter', action='store_true', help='Add hard samples.')
+    parser.add_argument('--clipping', action='store_true', help='clip retrieval results.')
+    parser.add_argument('--budget', type=int, help='Add hard samples.')
     parser.add_argument('--fast_thinking', action='store_true', help='Fast thinking version inference')
 
     args = parser.parse_args()
@@ -161,7 +164,7 @@ def main():
     llms = LLMs(llm_config)
 
     if args.mode == "inference":
-        test_set = RetrievalDataset(config=config["dataset"], split='test', training=False)
+        test_set = RetrievalDataset(config=config["dataset"], split='test', training=False, post_filter=args.post_filter)
         test_loader = DataLoader(test_set, batch_size=4, shuffle=False, collate_fn=collate_fn)
     else:
         train_set = RetrievalDataset(config=config["dataset"], split='train', opath=args.opath, hpath=args.hpath)
@@ -180,17 +183,19 @@ def main():
                 config=config['algorithm'], 
                 add_hard=args.add_hard, 
                 weight=args.weight,
-                reorder=args.reorder)
+                reorder=args.reorder,
+                clipping=args.clipping,
+                budget=args.budget)
 
     if args.mode == "inference":
         to_preserve = inference(cfre, test_loader, log_dir)
         # double check
         test_set = [dat for dat in test_set if dat["id"] in to_preserve]
-        test_loader = DataLoader(test_set, batch_size=1, shuffle=False, collate_fn=collate_fn)
-        cfre.llms.fast_thinking = False
-        cfre.llms.initialize_prompt_template()
+        test_loader = DataLoader(test_set, batch_size=4, shuffle=False, collate_fn=collate_fn)
+        # cfre.llms.fast_thinking = False
+        # cfre.llms.initialize_prompt_template()
+        cfre.llms.prompt_update()
         _ = inference(cfre, test_loader, log_dir)
-
         exit(0)
 
     # Set up Optimizer.
