@@ -26,22 +26,24 @@ class LLMs(nn.Module):
         self.fast_thinking = config["fast_thinking"]
         # prompt config
         print(config["frequency_penalty"])
+        self.cot_prompt = None
         if not self.fast_thinking:
             self.system_prompt = SYS_PROMPT
-            self.icl_prompt = [(ICL_USER_PROMPT, ICL_ASS_PROMPT), 
-                            (ICL_USER_PROMPT_2, ICL_ASS_PROMPT_2),
-                            (ICL_USER_PROMPT_3, ICL_ASS_PROMPT_3)
+            self.icl_prompt = [
+                            (ICL_USER_PROMPT, ICL_ASS_PROMPT), 
+                            # (ICL_USER_PROMPT_2, ICL_ASS_PROMPT_2),
+                            # (ICL_USER_PROMPT_3, ICL_ASS_PROMPT_3)
                             ]
             # self.icl_prompt = []
-        else:
-            self.system_prompt = SYS_PROMPT_brief
-            self.icl_prompt = [(ICL_USER_PROMPT, ICL_ASS_PROMPT_brief), 
-                            (ICL_USER_PROMPT_2, ICL_ASS_PROMPT_2_brief),
-                            (ICL_USER_PROMPT_3, ICL_ASS_PROMPT_3_brief)
-                            ]
+        # else:
+        #     self.system_prompt = SYS_PROMPT_brief
+        #     self.icl_prompt = [(ICL_USER_PROMPT, ICL_ASS_PROMPT_brief), 
+        #                     (ICL_USER_PROMPT_2, ICL_ASS_PROMPT_2_brief),
+        #                     (ICL_USER_PROMPT_3, ICL_ASS_PROMPT_3_brief)
+        #                     ]
             # self.system_prompt = SYS_PROMPT_brief_path_level_inf
             # self.icl_prompt = [(ICL_USER_PROMPT_path_level_inf, ICL_ASS_PROMPT_brief_path_level_inf)]
-        if "Llama" in self.model_name:
+        if self.model_name == "meta-llama/Meta-Llama-3.1-8B-Instruct":
             client = LLM(model=self.model_name, 
                          tensor_parallel_size=config["tensor_parallel_size"], 
                          max_seq_len_to_capture=config["max_seq_len_to_capture"],
@@ -77,6 +79,9 @@ class LLMs(nn.Module):
                             (ICL_USER_PROMPT_3, ICL_ASS_PROMPT_3_brief)
                             ]
     
+    def prompt_update(self, ):
+        self.cot_prompt = COT_PROMPT
+
     def generate_prompt(self, query, hints, triplets_or_paths):
         """
         Generation conversation given a query-triplet pair.
@@ -103,6 +108,7 @@ class LLMs(nn.Module):
         return self.pack_prompt(user_query)                
 
     def pack_prompt(self, user_query):
+
         conversation = []
         if 'sys' in self.prompt_mode:
             conversation.append({"role": "system", "content": self.system_prompt})
@@ -114,15 +120,17 @@ class LLMs(nn.Module):
 
         if 'sys' in self.prompt_mode:
             conversation.append({"role": "user", "content": user_query})
-        # if self.cot_mode:
-        #     conversation.append({"role": "user", "content": COT_PROMPT})
+        if self.cot_prompt:
+            conversation.append({"role": "user", "content": COT_PROMPT})
         return conversation
 
     def llm_inf(self, messages):
-        if "Llama" in self.model_name:
-            # batch version for llama
+        if self.model_name == "meta-llama/Meta-Llama-3.1-8B-Instruct":
             outputs = self.llm(messages=messages)
-            return [output.outputs[0].text for output in outputs]
+            # non-batch version
+            return outputs[0].outputs[0].text
+            # batch version
+            # return [output.outputs[0].text for output in outputs]
         else:
             # inference with retry
             retries, max_retries = 0, MAX_RETRIES
@@ -146,9 +154,9 @@ class LLMs(nn.Module):
 
     def forward(self, query_batch, hint_batch, triplet_or_path_batch):
         
-        if "Llama" in self.model_name:
-            conversation_batch = [self.generate_prompt(q,a,t) for q, a, t in zip(query_batch, hint_batch, triplet_or_path_batch)]
-            return self.llm_inf(conversation_batch)
+        # if self.model_name == "meta-llama/Meta-Llama-3.1-8B-Instruct":
+        #     conversation_batch = [self.generate_prompt(q,a,t) for q, a, t in zip(query_batch, hint_batch, triplet_or_path_batch)]
+        #     return self.llm_inf(conversation_batch)
         
         outputs = [self.llm_inf(messages=self.generate_prompt(q,a,t)) for q, a, t in zip(query_batch, hint_batch, triplet_or_path_batch)]
         # if "gpt" not in self.model_name:
@@ -158,7 +166,7 @@ class LLMs(nn.Module):
         return outputs
 
     # def bforward(self, query_batch, ans_batch, triplet_or_path_batch):
-    #     # batch generation, only for llama
+    #     # batch generation, only for Llama-3.1-8B
     #     conversation_batch = [self.generate_prompt(q,a,t) for q, a, t in zip(query_batch, ans_batch, triplet_or_path_batch)]
     #     outputs = self.llm(messages=conversation_batch)
     #     generations = [output.outputs[0].text for output in outputs]
@@ -169,7 +177,7 @@ class LLMs_Ret_Paths(LLMs):
         super().__init__(config)
         self.system_prompt = SYS_PROMPT_PATH
         self.icl_prompt = []
-        if "Llama" in self.model_name:
+        if self.model_name == "meta-llama/Meta-Llama-3.1-8B-Instruct":
             self.icl_prompt = [(ICL_USER_PROMPT_PATH_0, ICL_ASS_PROMPT_PATH_0),
                                (ICL_USER_PROMPT_PATH_1, ICL_ASS_PROMPT_PATH_1),
                                (ICL_USER_PROMPT_PATH_2, ICL_ASS_PROMPT_PATH_2),
@@ -203,7 +211,7 @@ class LLMs_Ret_Paths(LLMs):
             user_query = "\n\n".join([triplet_or_path_prompt, question_prompt, answer_prompt])
             messages_batch.append(self.pack_prompt(user_query))
         
-        if "Llama" in self.model_name:
+        if self.model_name == "meta-llama/Meta-Llama-3.1-8B-Instruct":
             response_batch = self.llm_inf(messages=messages_batch)
         else:
             response_batch = [self.llm_inf(messages=messages) for messages in messages_batch]
