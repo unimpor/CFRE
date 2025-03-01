@@ -33,6 +33,8 @@ class RLRE(nn.Module):
         self.reorder = kwargs.get("reorder", False)
         self.retrieval_clip = kwargs.get("clipping", False)
         self.budget = kwargs.get("budget", 100)
+        self.level = kwargs.get("level", "triplet")
+        print(self.budget, self.retrieval_clip, self.reorder, self.level)
         
     @property
     def device(self):
@@ -55,7 +57,6 @@ class RLRE(nn.Module):
         }
         for g,q,a,d in zip(g_batch, q_batch, a_batch, id_batch):
             (f1, prec, recall), (matched, not_prec, missing) = self.reward_metrics.calc_r(g,a,q)
-            print(f1, prec, recall)
             self.evaluation[d].update({
                 "F1": f1,
                 "precision": prec,
@@ -162,20 +163,29 @@ class RLRE(nn.Module):
         select_batch = []
         
         for i, dat_id in enumerate(id_batch):
+            select_paths = None
             attn_logit = attn_logits_batch[triplet_batch_idx == i]
             _, select_idx = self.sampling_v3(attn_logit, K=self.K)
             # if not retrieval:
             #     select_idx = shortest_path_idx_batch[i]
             if self.reorder:
-                select_idx = self.reorganize(triplet_batch[i], hints_batch[i], select_idx, attn_logit)
+                select_idx, select_paths = self.reorganize(triplet_batch[i], hints_batch[i], select_idx, attn_logit)
 
-            self.evaluation[dat_id] = {"select": select_idx}
-            select_batch.append(select_idx)
+            self.evaluation[dat_id] = {"select": select_idx, "select_paths": select_paths}
+            if self.level == 'triplet':
+                select_batch.append(select_idx)
+            elif self.level == 'path':
+                assert self.reorder
+                select_batch.append(select_paths)
+            else:
+                raise NotImplementedError
         # triplet level inference
-        masked_triplets_batch, _ = self.mask_triplet(triplet_batch, select_batch)
-        generation_batch = self.llms(question_batch, hints_batch, masked_triplets_batch)
+        if self.level == 'triplet':
+            masked_triplets_batch, _ = self.mask_triplet(triplet_batch, select_batch)
+            generation_batch = self.llms(question_batch, hints_batch, masked_triplets_batch)
         # path level inferene
-        # generation_batch = self.llms(question_batch, hints_batch, select_batch)
+        elif self.level == 'path':
+            generation_batch = self.llms(question_batch, hints_batch, select_batch)
         for dat_id, g in zip(id_batch, generation_batch):
             print_log(dat_id, logging)
             print_log(g, logging)
@@ -217,8 +227,9 @@ class RLRE(nn.Module):
             logits_batch.append(attn_logit)
             _, select_idx = self.sampling_v3(attn_logit, K=self.K if not training else 200)
 
-            hard_idx = hard_idx_batch[i]
-            hard_idx = [i for i in hard_idx if i in select_idx]
+            hard_idx, pos_idx = hard_idx_batch[i], relevant_idx_batch[i]
+            # TODO: add hard positive or not ?
+            hard_idx = [i for i in hard_idx if i in select_idx] + [j for j in pos_idx if j not in select_idx[:50]]
             hard_idx_batch_.append(hard_idx)
 
             if not training:
@@ -238,9 +249,8 @@ class RLRE(nn.Module):
             return 0, reward_loggings
         
 
-        loss, reward_loggings = self.cal_loss(logits_batch, relevant_idx_batch, relevant_idx_in_path_batch, epoch=epoch)
-        
-        # loss, reward_loggings = self.cal_loss_with_weights(logits_batch, relevant_idx_batch, hard_idx_batch_)
+        # loss, reward_loggings = self.cal_loss(logits_batch, relevant_idx_batch, relevant_idx_in_path_batch, epoch=epoch)
+        loss, reward_loggings = self.cal_loss_with_weights(logits_batch, relevant_idx_batch, hard_idx_batch_)
         return loss, reward_loggings
 
     def sampling_v3(self, tensor, training=False, K=6):
@@ -300,24 +310,25 @@ class RLRE(nn.Module):
         for i in with_topics:
             for j in non_topics:
                 s, t = (i[-1], j[0]) if i[0] in q_entities else (j[-1], i[0])
-                start, end = ([i], [j]) if i[0] in q_entities else ([j], [i])
+                motif = [i, j] if i[0] in q_entities else [j, i]
                 # s == t represents 2-hop neighbors from source.
                 if s == t:
-                    detected_paths.append(start + end)
-                    visited.extend(start + end)
+                    detected_paths.append(motif)
+                    visited.extend(motif)
                     continue
         
         non_topics = [i for i in non_topics if i not in visited]
         detected_paths_three_hops, detected_paths_four_hops = [], []
 
-        # () [(), ()]
+        # () [(), ()] three-hops neighbors
         for i in non_topics:
             for j in detected_paths:
-                s, t = (i[-1], j[0][0]) if j[-1][-1] in q_entities else (j[-1][-1], i[0][0])
-                start, end =  ([i], j) if j[-1][-1] in q_entities else (j, [i])
+                s, t = (i[-1], j[0][0]) if j[-1][-1] in q_entities else (j[-1][-1], i[0])
+                motif =  [i]+j if j[-1][-1] in q_entities else j+[i]
                 if s == t:
-                    detected_paths_three_hops.append(start + end)
-        detected_paths = [i for i in detected_paths if i not in visited]
+                    detected_paths_three_hops.append(motif)
+        
+        # detected_paths = [i for i in detected_paths if i not in visited]
 
         def score(lst, all_triplets, logits):
             logit_values = logits[[all_triplets.index(k) for k in lst]]
@@ -332,11 +343,20 @@ class RLRE(nn.Module):
 
         # triplet level
         detected_triplets = [all_triplets.index(item) for path in detected_paths for item in path]
+        
+        detected_paths.extend([[all_triplets[i]] for i in select_idx if i not in detected_triplets])
         detected_triplets.extend([i for i in select_idx if i not in detected_triplets])
+        
         if self.retrieval_clip:
-            return detected_triplets[:max(len(select_idx), self.budget)]
+            final_paths, triplets_budget = [], 0
+            for i in detected_paths:
+                final_paths.append(i)
+                triplets_budget += len(i)
+                if triplets_budget > self.budget:
+                    break
+            return detected_triplets[:self.budget], final_paths
         else:
-            return detected_triplets
+            return detected_triplets, detected_paths
 
 
 def remove_duplicates(input_list):
