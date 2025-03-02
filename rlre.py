@@ -318,23 +318,23 @@ class RLRE(nn.Module):
                     continue
         
         non_topics = [i for i in non_topics if i not in visited]
-        detected_paths_three_hops, detected_paths_four_hops = [], []
+        # detected_paths_three_hops, detected_paths_four_hops = [], []
 
         # () [(), ()] three-hops neighbors
-        for i in non_topics:
-            for j in detected_paths:
-                s, t = (i[-1], j[0][0]) if j[-1][-1] in q_entities else (j[-1][-1], i[0])
-                motif =  [i]+j if j[-1][-1] in q_entities else j+[i]
-                if s == t:
-                    detected_paths_three_hops.append(motif)
-        
+        # for i in non_topics:
+        #     for j in detected_paths:
+        #         s, t = (i[-1], j[0][0]) if j[-1][-1] in q_entities else (j[-1][-1], i[0])
+        #         motif =  [i]+j if j[-1][-1] in q_entities else j+[i]
+        #         if s == t:
+        #             detected_paths_three_hops.append(motif)
+        # TODO: if we need this
         # detected_paths = [i for i in detected_paths if i not in visited]
 
         def score(lst, all_triplets, logits):
             logit_values = logits[[all_triplets.index(k) for k in lst]]
             return logit_values.mean().item()
 
-        detected_paths = detected_paths + detected_paths_three_hops
+        # detected_paths = detected_paths + detected_paths_three_hops
 
         detected_paths = sorted(detected_paths, 
                                 key=lambda lst: score(lst, all_triplets, logits), 
@@ -347,6 +347,9 @@ class RLRE(nn.Module):
         detected_paths.extend([[all_triplets[i]] for i in select_idx if i not in detected_triplets])
         detected_triplets.extend([i for i in select_idx if i not in detected_triplets])
         
+        # TODO: remove duplicated
+        detected_triplets = remove_duplicates(detected_triplets)
+
         if self.retrieval_clip:
             final_paths, triplets_budget = [], 0
             for i in detected_paths:

@@ -1,4 +1,6 @@
 import random
+from openai import AsyncOpenAI
+import asyncio
 import re
 import time
 from vllm import LLM, SamplingParams
@@ -108,8 +110,11 @@ class LLMs(nn.Module):
         return self.pack_prompt(user_query)                
 
     def pack_prompt(self, user_query):
-
         conversation = []
+        # if self.model_name == "deepseek/deepseek-r1":
+        #     conversation.append({"role": "user", "content": self.system_prompt + '\n\n' + user_query})
+        #     return conversation
+        
         if 'sys' in self.prompt_mode:
             conversation.append({"role": "system", "content": self.system_prompt})
 
