@@ -32,7 +32,7 @@ class LLMs(nn.Module):
         if not self.fast_thinking:
             self.system_prompt = SYS_PROMPT
             self.icl_prompt = [
-                            (ICL_USER_PROMPT, ICL_ASS_PROMPT), 
+                            # (ICL_USER_PROMPT, ICL_ASS_PROMPT), 
                             # (ICL_USER_PROMPT_2, ICL_ASS_PROMPT_2),
                             # (ICL_USER_PROMPT_3, ICL_ASS_PROMPT_3)
                             ]
@@ -56,10 +56,11 @@ class LLMs(nn.Module):
                                             frequency_penalty=config["frequency_penalty"])
             self.llm = partial(client.chat, sampling_params=sampling_params, use_tqdm=False)
         else:
-            client = OpenAI(
+            client = AsyncOpenAI(
                 base_url="https://api.aimlapi.com/v1/",
                 api_key=API_KEY,  
             )
+            self.semaphore = asyncio.Semaphore(15)
             print(config['seed'], config['temperature'])
             self.llm = partial(client.chat.completions.create, 
                                model=self.model_name, 
@@ -88,16 +89,20 @@ class LLMs(nn.Module):
         """
         Generation conversation given a query-triplet pair.
         """
-        # triplet level prompt
-        triplet_prompt = "Triplets:\n" + "\n".join(triplets_or_paths)
-
-        # path level prompt
-        # formatted_paths = []
-        # for i, path in enumerate(triplets_or_paths):
-        #     formatted_path = f"{i}. "
-        #     formatted_path += ', '.join([str(triplet) for triplet in path])
-        #     formatted_paths.append(formatted_path)
-        # triplet_prompt = "Paths:\n" + "\n".join(formatted_paths)
+        if type(triplets_or_paths[0]) is str:
+            # triplet level prompt
+            triplet_prompt = "Triplets:\n" + "\n".join(triplets_or_paths)
+        elif type(triplets_or_paths[0]) is list:
+            # path level prompt
+            formatted_paths = []
+            for i, path in enumerate(triplets_or_paths):
+                if len(path) == 1:
+                    break
+                formatted_path = f"Path {i}. "
+                formatted_path += ', '.join([str(triplet) for triplet in path])
+                formatted_paths.append(formatted_path)
+            triplets_or_paths = [str(item[0]) for item in triplets_or_paths if len(item) == 1]
+            triplet_prompt = "Paths:\n" + "\n".join(formatted_paths) + '\n' + "Scattered Triplets:\n" + "\n".join(triplets_or_paths)
         
         question_prompt = "Question:\n" + query
         if question_prompt[-1] != '?':
@@ -170,12 +175,31 @@ class LLMs(nn.Module):
         #     generations = [output.choices[0].message.content for output in outputs]
         return outputs
 
-    # def bforward(self, query_batch, ans_batch, triplet_or_path_batch):
-    #     # batch generation, only for Llama-3.1-8B
-    #     conversation_batch = [self.generate_prompt(q,a,t) for q, a, t in zip(query_batch, ans_batch, triplet_or_path_batch)]
-    #     outputs = self.llm(messages=conversation_batch)
-    #     generations = [output.outputs[0].text for output in outputs]
-    #     return generations
+    async def forward_pass(self, query_batch, hint_batch, triplet_or_path_batch):
+        q,a,t = query_batch[0], hint_batch[0], triplet_or_path_batch[0]
+        return await self.llm_inf_asy(self.generate_prompt(q,a,t))
+
+    async def llm_inf_asy(self, messages):
+        retries = 0
+        while retries < MAX_RETRIES:
+            try:
+                async with self.semaphore:
+                    output = await self.llm(messages=messages)
+                return output.choices[0].message.content
+            except openai.BadRequestError as e:
+                print(e)
+                break
+            except openai.RateLimitError:
+                wait_time = (2 ** retries) * 5
+                print(f"Rate limit error encountered. Retrying in {wait_time} seconds...")
+                await asyncio.sleep(wait_time)
+                retries += 1
+            except Exception as e:
+                print(f"Unexpected error: {e}")
+                break
+        print("Max retries exceeded. Please check your rate limits or try again later.")
+        return "ans: Not available"
+
 
 class LLMs_Ret_Paths(LLMs):
     def __init__(self, config):

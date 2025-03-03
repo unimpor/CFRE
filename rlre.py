@@ -1,3 +1,4 @@
+import asyncio
 import torch
 import numpy as np
 import pandas as pd
@@ -152,45 +153,36 @@ class RLRE(nn.Module):
         total_loss = warmup_loss + self.coeff1 * cons_loss if epoch > 2 else warmup_loss
         return total_loss, {"warmup": warmup_loss.item(), "consistency": cons_loss.item()}
 
-    def inference(self, batch, logging, retrieval=True): 
+    def preparing(self, batch):
+        # batch size = 1
         graph_batch, answer_batch, triplet_batch, triplet_batch_idx, relevant_idx_batch, question_batch, q_embd_batch, id_batch, shortest_path_idx_batch, hints_batch = \
             batch["graph"], batch["y"], batch["triplets"], batch['triplet_batch_idx'], batch["relevant_idx"], batch["q"], batch["q_embd"], batch["id"], batch["shortest_path_idx"], batch["q_entity"]
-
+        dat_id, all_triplets, q_entities = id_batch[0], triplet_batch[0], hints_batch[0]
         graph_batch, q_embd_batch = \
             graph_batch.to(self.device), q_embd_batch.to(self.device)
 
         attn_logits_batch = self.retriever(graph_batch, q_embd_batch)
-        select_batch = []
-        
-        for i, dat_id in enumerate(id_batch):
-            select_paths = None
-            attn_logit = attn_logits_batch[triplet_batch_idx == i]
-            _, select_idx = self.sampling_v3(attn_logit, K=self.K)
-            # if not retrieval:
-            #     select_idx = shortest_path_idx_batch[i]
-            if self.reorder:
-                select_idx, select_paths = self.reorganize(triplet_batch[i], hints_batch[i], select_idx, attn_logit)
+        select_idx = self.sampling_v3(attn_logits_batch, K=self.K)
 
-            self.evaluation[dat_id] = {"select": select_idx, "select_paths": select_paths}
-            if self.level == 'triplet':
-                select_batch.append(select_idx)
-            elif self.level == 'path':
-                assert self.reorder
-                select_batch.append(select_paths)
-            else:
-                raise NotImplementedError
-        # triplet level inference
-        if self.level == 'triplet':
-            masked_triplets_batch, _ = self.mask_triplet(triplet_batch, select_batch)
-            generation_batch = self.llms(question_batch, hints_batch, masked_triplets_batch)
-        # path level inferene
-        elif self.level == 'path':
-            generation_batch = self.llms(question_batch, hints_batch, select_batch)
-        for dat_id, g in zip(id_batch, generation_batch):
-            print_log(dat_id, logging)
-            print_log(g, logging)
-        reward_loggings = self.cal_reward(generation_batch, question_batch, answer_batch, id_batch, 0, training=False)
-        return 0, reward_loggings
+        select_paths = None
+        if self.reorder:
+            select_idx, select_paths = self.reorganize(all_triplets, q_entities, select_idx, attn_logits_batch)
+        select_triplets = [triplet_to_str(all_triplets[i]) for i in select_idx]
+        
+        self.evaluation[dat_id] = {"select": select_idx, 
+                                   "select_paths": select_paths,
+                                   "select_triplets": select_triplets}
+
+    async def inference(self, batch, logging=None, retrieval=True): 
+        answer_batch, question_batch, id_batch, hints_batch = batch["y"], batch["q"], batch["id"], batch["q_entity"]
+        cache = self.evaluation[id_batch[0]]
+        select_triplets, select_paths = cache["select_triplets"], cache["select_paths"]
+        if self.level == "triplet":
+            generation_batch = await self.llms.forward_pass(question_batch, hints_batch, [select_triplets])
+        elif self.level == "path":
+            generation_batch = await self.llms.forward_pass(question_batch, hints_batch, [select_paths])
+        reward_loggings = self.cal_reward([generation_batch], question_batch, answer_batch, id_batch, 0, training=False)
+        return reward_loggings
 
     @torch.no_grad()
     def oracle_detection(self, batch, logging):
@@ -225,7 +217,7 @@ class RLRE(nn.Module):
         for i, dat_id in enumerate(id_batch):
             attn_logit = attn_logits_batch[triplet_batch_idx == i]
             logits_batch.append(attn_logit)
-            _, select_idx = self.sampling_v3(attn_logit, K=self.K if not training else 200)
+            select_idx = self.sampling_v3(attn_logit, K=self.K if not training else 200)
 
             hard_idx, pos_idx = hard_idx_batch[i], relevant_idx_batch[i]
             # TODO: add hard positive or not ?
@@ -248,15 +240,19 @@ class RLRE(nn.Module):
             reward_loggings = {k:np.mean(v).item() for k,v in reward_loggings.items()}
             return 0, reward_loggings
         
-
         # loss, reward_loggings = self.cal_loss(logits_batch, relevant_idx_batch, relevant_idx_in_path_batch, epoch=epoch)
         loss, reward_loggings = self.cal_loss_with_weights(logits_batch, relevant_idx_batch, hard_idx_batch_)
         return loss, reward_loggings
 
     def sampling_v3(self, tensor, training=False, K=6):
         sorted_indices = torch.argsort(tensor, descending=True)
-        positive_indices = sorted_indices[:K]
-        return None, positive_indices.tolist()
+        try:
+            positive_indices = sorted_indices[:K]
+        except:
+            positive_indices = sorted_indices
+        select_idx = positive_indices.tolist()
+
+        return select_idx if type(select_idx) is list else [select_idx]
 
     def sampling_v2(self, tensor, training=False, K=6):
         indices = torch.arange(len(tensor), device=tensor.device)
@@ -318,23 +314,20 @@ class RLRE(nn.Module):
                     continue
         
         non_topics = [i for i in non_topics if i not in visited]
-        # detected_paths_three_hops, detected_paths_four_hops = [], []
+        detected_paths_three_hops, detected_paths_four_hops = [], []
 
-        # () [(), ()] three-hops neighbors
-        # for i in non_topics:
-        #     for j in detected_paths:
-        #         s, t = (i[-1], j[0][0]) if j[-1][-1] in q_entities else (j[-1][-1], i[0])
-        #         motif =  [i]+j if j[-1][-1] in q_entities else j+[i]
-        #         if s == t:
-        #             detected_paths_three_hops.append(motif)
-        # TODO: if we need this
-        # detected_paths = [i for i in detected_paths if i not in visited]
+        for i in non_topics:
+            for j in detected_paths:
+                s, t = (i[-1], j[0][0]) if j[-1][-1] in q_entities else (j[-1][-1], i[0])
+                motif =  [i]+j if j[-1][-1] in q_entities else j+[i]
+                if s == t:
+                    detected_paths_three_hops.append(motif)
 
         def score(lst, all_triplets, logits):
             logit_values = logits[[all_triplets.index(k) for k in lst]]
             return logit_values.mean().item()
 
-        # detected_paths = detected_paths + detected_paths_three_hops
+        detected_paths = detected_paths + detected_paths_three_hops
 
         detected_paths = sorted(detected_paths, 
                                 key=lambda lst: score(lst, all_triplets, logits), 
@@ -387,6 +380,8 @@ def gen_path(G, source, target):
         all_triplets_in_path.append(triplets_in_path)
     return all_triplets_in_path
 
+def triplet_to_str(triplet):
+    return f"({triplet[0]},{triplet[1]},{triplet[2]})"
 
 def get_avg_ranks(all_triples, sorted_indices, ans_list):
     ranks = []
@@ -433,3 +428,11 @@ def get_avg_ranks(all_triples, sorted_indices, ans_list):
     # detected_paths_three_hops = sorted(detected_paths_three_hops,
     #                                    key=lambda lst: score(lst, all_triplets, logits),
     #                                    reverse=True)
+
+
+        # path level inferene
+        # elif self.level == 'path':
+        #     generation_batch = await self.llms.forward_pass(question_batch, hints_batch, select_batch)
+        # for dat_id, g in zip(id_batch, generation_batch):
+        #     print_log(dat_id, logging)
+        #     print_log(g, logging)

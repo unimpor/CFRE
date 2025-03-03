@@ -1,5 +1,6 @@
 import argparse
 import os
+import time
 import yaml
 import torch
 import pandas as pd
@@ -16,30 +17,42 @@ from src.utils import collate_fn, set_seed, save_checkpoint, reload_best_model, 
 from src.datasets import RetrievalDataset, RetrievalDatasetWithoutEmb
 import sys
 import random
+import asyncio
 sys.stdout.reconfigure(encoding='utf-8')
 
+global_loop = asyncio.new_event_loop()
+asyncio.set_event_loop(global_loop)
+
+async def inference_core(cfre, test_loader, log_dir):
+    # logging_file = opj(log_dir, f"logging-inference-ret-{cfre.K}.txt")
+    tasks = [cfre.inference(batch) for batch in test_loader]
+    return await asyncio.gather(*tasks)
+    
 
 def inference(cfre, test_loader, log_dir, ):
     loggings = opj(log_dir, "logging.txt")
-    K = cfre.K
     all_loss_dict_val, to_preserve = {}, []
     with torch.no_grad():
-        for batch in tqdm(test_loader):
-            _, loss_dict = cfre.inference(batch, opj(log_dir, f"logging-inference-ret-{K}.txt"))
-            for k, v in loss_dict.items():
-                all_loss_dict_val[k] = all_loss_dict_val.get(k, []) + v
+        for batch in test_loader:
+            cfre.preparing(batch)
+    
+    results = global_loop.run_until_complete(inference_core(cfre, test_loader, log_dir))
+
+    for loss_dict in results:
+        for k, v in loss_dict.items():
+            all_loss_dict_val[k] = all_loss_dict_val.get(k, []) + v
+    
+    for k, v in all_loss_dict_val.items():
+        all_loss_dict_val[k] = np.mean(v)
         
-        for k, v in all_loss_dict_val.items():
-            all_loss_dict_val[k] = np.mean(v)
-        
-    write_log(f"Test-Inference-Retrieval-{K}" + str(all_loss_dict_val), loggings)
+    write_log(f"Test-Inference-Retrieval-{cfre.K}" + str(all_loss_dict_val), loggings)
     
     for k, v in cfre.evaluation.items():
         gen = v['gen']
         if 'ans:' not in gen.lower() or "ans: not available" in gen.lower() or "ans: no information available" in gen.lower():
             to_preserve.append(k)
 
-    torch.save(cfre.evaluation, opj(log_dir, f"inference-ret-{K}.pth"))
+    torch.save(cfre.evaluation, opj(log_dir, f"inference-ret-{cfre.K}.pth"))
 
     return to_preserve
 
@@ -166,7 +179,7 @@ def main():
 
     if args.mode == "inference":
         test_set = RetrievalDataset(config=config["dataset"], split='test', training=False, post_filter=args.post_filter)
-        test_loader = DataLoader(test_set, batch_size=4, shuffle=False, collate_fn=collate_fn)
+        test_loader = DataLoader(test_set, batch_size=1, shuffle=False, collate_fn=collate_fn)
     else:
         train_set = RetrievalDataset(config=config["dataset"], split='train', opath=args.opath, hpath=args.hpath)
         val_set = RetrievalDataset(config=config["dataset"], split='val', training=False)
@@ -186,17 +199,19 @@ def main():
                 weight=args.weight,
                 reorder=args.reorder,
                 clipping=args.clipping,
-                budget=args.budget)
+                budget=args.budget,
+                level=args.inf_level)
 
     if args.mode == "inference":
+        start = time.time()
         to_preserve = inference(cfre, test_loader, log_dir)
+        end = time.time()
+        print(len(to_preserve), (end-start)/60)
         # double check
-        test_set = [dat for dat in test_set if dat["id"] in to_preserve]
-        test_loader = DataLoader(test_set, batch_size=4, shuffle=False, collate_fn=collate_fn)
-        # cfre.llms.fast_thinking = False
-        # cfre.llms.initialize_prompt_template()
-        cfre.llms.prompt_update()
-        _ = inference(cfre, test_loader, log_dir)
+        # test_set = [dat for dat in test_set if dat["id"] in to_preserve]
+        # test_loader = DataLoader(test_set, batch_size=1, shuffle=False, collate_fn=collate_fn)
+        # cfre.llms.prompt_update()
+        # _ = inference(cfre, test_loader, log_dir)
         exit(0)
 
     # Set up Optimizer.
