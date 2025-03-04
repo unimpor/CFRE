@@ -12,6 +12,7 @@ from src.utils import print_log, remove_duplicates, match
 from copy import deepcopy
 import time
 
+NOISES = ["Country", "College/University", "Male", "Continent"]
 
 class RetrievalDataset:
     """
@@ -23,21 +24,14 @@ class RetrievalDataset:
         self.config = config
         self.root = config['root']
         self.data_name = config['name']
-        self.post_filter = False  # filter bad samples.
+        self.post_filter = kwargs.get("post_filter", False)  # filter bad samples.
 
         self.oracle_path = kwargs.get("opath", None)
         self.hard_path = kwargs.get("hpath", None)
 
         self.training = kwargs.get("training", True)
-        # self.version = kwargs.get("version", None)  # tmp arg  
-        # if self.version in ["path", "triplet", "relation"]:
-        #     self.tmp_data = torch.load(f"datasets/{self.data_name}/checkpoints/reward_alloc.pth")[self.version]    
-        
         raw_data = self._load_data(opj(self.root, self.data_name, "processed", f"{self.split}.pkl"))
-        # embs = self._load_emb()
-        # scored_data = self._load_data(opj(self.root, self.data_name, "processed", f"{self.data_name}_241028_{self.split}.pth"))
         self.processed_data = self.process(raw_data, )
-
 
     @property
     def processed_file_names(self):
@@ -100,20 +94,24 @@ class RetrievalDataset:
                 # assert hard neg not intersected with ans
                 hard_negatives = [i for i in hard_negatives if i not in sample["a_entity"]]
                 # assert len(set(hard_negatives) & set(sample["a_entity"])) == 0
-                hard_negatives_paths = get_paths(all_triplets, sample["q_entity"], hard_negatives)
+                # hard_negatives_paths = get_paths(all_triplets, sample["q_entity"], hard_negatives)
                 # hard_positive_paths = get_pos_paths(oracle_paths, hard_paths_cache[sample_id]['missing'])
+                hard_negatives_paths = []
+                for path in hard_paths_cache[sample_id]['select_paths']:
+                    path_entities = [i for t in path for i in t]
+                    if set(path_entities) & set(hard_negatives):
+                        hard_negatives_paths.append(path)
 
             def path2tid(all_t, all_p):
                 return remove_duplicates([all_t.index(item) for path in all_p for item in path])
             
             shortest_path_idx = path2tid(all_triplets, shortest_paths)
             oracle_path_idx = path2tid(all_triplets, oracle_paths)
-            hard_neg_path_idx = path2tid(all_triplets, hard_negatives_paths)
-
+            hard_neg_path_idx_ = path2tid(all_triplets, hard_negatives_paths)
+            hard_neg_path_idx = [i for i in hard_neg_path_idx_ if i not in oracle_path_idx]
             # if len(set(oracle_path_idx) & set(hard_neg_path_idx)) > 0:
             #     print(len(set(oracle_path_idx) & set(hard_neg_path_idx)))
             #     num += 1
-
             hard_pos_path_idx = path2tid(all_triplets, hard_positive_paths)
 
             # shortest_path_idx = [all_triplets.index(item) for path in shortest_paths for item in path]
@@ -132,7 +130,7 @@ class RetrievalDataset:
                 "q": sample["question"],
                 "q_embd": sample_embd['q_emb'],
                 "a_entity": [all_entities[idx] for idx in sample["a_entity_id_list"]],
-                "q_entity": [all_entities[idx] for idx in sample["q_entity_id_list"]],
+                "q_entity": [all_entities[idx] for idx in sample["q_entity_id_list"] if all_entities[idx] not in NOISES],
                 "triplets": all_triplets,
                 "relevant_idx": oracle_path_idx,
                 "relevant_idx_in_path": [[all_triplets.index(item) for item in path] for path in oracle_paths],
@@ -141,7 +139,6 @@ class RetrievalDataset:
                 "y": sample["a_entity"],
                 "graph": Data(x=x, scores=scores, edge_attr=edge_attr, edge_index=edge_index.long(), topic_signal=topic_entity_one_hot.float())
             }
-            assert processed_sample["graph"].topic_signal.shape[0] == processed_sample["graph"].x.shape[0]
             processed_data.append(processed_sample)
         # print(num)
         # input("suncc")

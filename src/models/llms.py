@@ -9,7 +9,7 @@ from openai import OpenAI
 from functools import partial
 import torch.nn as nn
 from src.utils.prompts import *
-from src.utils import print_log
+from src.utils import print_log, triplet_to_str
 
 API_KEY = "215e0f164f9f445ea2aaa64db2e1c135"
 # API_KEY="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"
@@ -32,7 +32,7 @@ class LLMs(nn.Module):
         if not self.fast_thinking:
             self.system_prompt = SYS_PROMPT
             self.icl_prompt = [
-                            # (ICL_USER_PROMPT, ICL_ASS_PROMPT), 
+                            (ICL_USER_PROMPT, ICL_ASS_PROMPT), 
                             # (ICL_USER_PROMPT_2, ICL_ASS_PROMPT_2),
                             # (ICL_USER_PROMPT_3, ICL_ASS_PROMPT_3)
                             ]
@@ -60,7 +60,7 @@ class LLMs(nn.Module):
                 base_url="https://api.aimlapi.com/v1/",
                 api_key=API_KEY,  
             )
-            self.semaphore = asyncio.Semaphore(15)
+            self.semaphore = asyncio.Semaphore(20)
             print(config['seed'], config['temperature'])
             self.llm = partial(client.chat.completions.create, 
                                model=self.model_name, 
@@ -99,19 +99,22 @@ class LLMs(nn.Module):
                 if len(path) == 1:
                     break
                 formatted_path = f"Path {i}. "
-                formatted_path += ', '.join([str(triplet) for triplet in path])
+                formatted_path += ', '.join([triplet_to_str(triplet) for triplet in path])
                 formatted_paths.append(formatted_path)
-            triplets_or_paths = [str(item[0]) for item in triplets_or_paths if len(item) == 1]
-            triplet_prompt = "Paths:\n" + "\n".join(formatted_paths) + '\n' + "Scattered Triplets:\n" + "\n".join(triplets_or_paths)
+            triplets_or_paths = [triplet_to_str(item[0]) for item in triplets_or_paths if len(item) == 1]
+            if len(triplets_or_paths) > 0:
+                triplet_prompt = "Paths:\n" + "\n".join(formatted_paths) + '\n' + "Scattered Triplets:\n" + "\n".join(triplets_or_paths)
+            else:
+                triplet_prompt = "Paths:\n" + "\n".join(formatted_paths)
         
         question_prompt = "Question:\n" + query
         if question_prompt[-1] != '?':
             question_prompt += '?'
         
-        hint_prompt = "Hints:\n" + "\n".join(hints)
+        # hint_prompt = "Hints:\n" + "\n".join(hints)
         
-        user_query = "\n\n".join([triplet_prompt, question_prompt, hint_prompt])
-        # user_query = "\n\n".join([triplet_prompt, question_prompt])
+        # user_query = "\n\n".join([triplet_prompt, question_prompt, hint_prompt])
+        user_query = "\n\n".join([triplet_prompt, question_prompt])
         return self.pack_prompt(user_query)                
 
     def pack_prompt(self, user_query):

@@ -43,6 +43,8 @@ def print_log(content, save_path = "fig/cwq_pure_weak_.txt"):
     with open(save_path, "a", encoding="utf-8") as f:
         f.write(content + "\n")
 
+def triplet_to_str(triplet):
+    return f"({triplet[0]},{triplet[1]},{triplet[2]})"
 
 def remove_duplicates(input_list):
     seen = set()
@@ -77,6 +79,9 @@ def remove_duplicates(input_list):
 #     return sample['edge_index'], sample['entity_embd'], sample["y"], sample['edge_attr'], \
 #         sample['triplets'], sample['relevant_idx'], \
 #         sample['q'], sample['q_embd']
+
+def reorder_(lst):
+    return lst[::2] + lst[1::2][::-1]
 
 def collate_fn(batch_org):
     batch = {}

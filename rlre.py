@@ -4,11 +4,12 @@ import numpy as np
 import pandas as pd
 import torch.nn as nn
 import torch.nn.functional as F
-from src.utils import RewardMetrics, gumbel_topk, print_log, reorder
+from src.utils import RewardMetrics, gumbel_topk, print_log, triplet_to_str
 import copy
+import itertools
 import random
 import math
-from collections import Counter
+from collections import Counter, deque
 from copy import deepcopy
 import networkx as nx
 
@@ -268,32 +269,31 @@ class RLRE(nn.Module):
         #     positive_indices = sorted_indices[:K]
         return None, positive_indices.tolist()
 
-    def mask_triplet(self, triplets_batch, select_idx_batch, to_str=True):
-        """
-        `strategy` can be set as "drop" or "mask", "drop" as default.
-        Mask tokenized triplets using attn
-        # Note this method is achieved based on sample-wise not batch-wise.
-        # we prefer "drop" strategy with ordered K-sampling w.o. replacement.
-        """
-        # Example: triplets converted into strings
-
-        # Load the tokenizer
-        def triplet_to_str(triplet):
-            return f"({triplet[0]},{triplet[1]},{triplet[2]})"
-        # Tokenize each triplet string
-        masked_attns_batch, masked_triplets_batch = [], []
-        for triplets, keep_idx in zip(triplets_batch, select_idx_batch):
-        # In this strategy, just drop the unselected triplets.
-            # keep_idx = [idx for idx, score in enumerate(attns) if score.item() == 1]
-            select_triplets = [triplet_to_str(triplets[idx]) for idx in keep_idx]
-            masked_triplets_batch.append(select_triplets)
-            # assert attns.shape == triplets_token_ids.shape
-            # masked_token_ids = attns * triplets_token_ids
-        return masked_triplets_batch, masked_attns_batch
-        # return masked_token_ids
-
     def reorganize(self, all_triplets, q_entities, select_idx, logits, ):
-        with_topics, non_topics = [], []
+        if len(all_triplets) < 5:
+            return select_idx, [[all_triplets[i]] for i in select_idx]
+        def to_match(topic, n_topic):
+            assert type(topic) is list and type(n_topic) is list
+            s, t, dc = (topic[-1][-1], n_topic[0][0], n_topic[-1][-1]) if topic[0][0] in q_entities else (n_topic[-1][-1], topic[0][0], n_topic[0][0])
+            motif = topic+n_topic if topic[0][0] in q_entities else n_topic+topic
+            dc_lst = [t for p in topic for t in p]
+            return motif if (s == t) and (dc not in dc_lst) else None
+
+        # TODO: retrieval cleaning, can also done before select.
+        for (i,j) in itertools.combinations(select_idx, 2):
+            ti, tj = all_triplets[i], all_triplets[j]
+            # remove self-loop
+            if ti[0] == tj[-1] and ti[-1] == tj[0] and (ti[0] in q_entities or ti[-1] in q_entities):
+                to_del = i if ti[-1] in q_entities else j
+            # remove abundant relations for the same entity pair
+            elif ti[0] == tj[0] and ti[-1] == tj[-1]:
+                si, sj = logits[i].item(), logits[i].item()
+                to_del = j if si > sj else i
+            else:
+                continue
+            select_idx = [k for k in select_idx if k != to_del]
+
+        with_topics, non_topics, detected_paths  = [], [], []
         for idx in select_idx:
             triple = all_triplets[idx]
             if triple[0] in q_entities or triple[-1] in q_entities:
@@ -301,47 +301,47 @@ class RLRE(nn.Module):
             else:
                 non_topics.append(triple)
         
-        detected_paths, visited = [], []
-    
-        for i in with_topics:
-            for j in non_topics:
-                s, t = (i[-1], j[0]) if i[0] in q_entities else (j[-1], i[0])
-                motif = [i, j] if i[0] in q_entities else [j, i]
-                # s == t represents 2-hop neighbors from source.
-                if s == t:
-                    detected_paths.append(motif)
-                    visited.extend(motif)
-                    continue
+        detected_pairs = [(t[0], t[-1]) for t in with_topics]
+        non_topics, with_topics = [[itm] for itm in non_topics], [[itm] for itm in with_topics]
+        with_topics_queue = deque(with_topics)
+        # BFS-based triplet expansion
+        while with_topics_queue:
+            seg = with_topics_queue.popleft()
+            if len(seg) > 1 and seg not in detected_paths:
+                detected_paths.append(seg)
+            # if len(seg) > 2:
+            #     continue
+            # visited = []
+            for b in non_topics:
+                motif = to_match(seg, b)
+                if motif and (motif[0][0], motif[-1][-1]) not in detected_pairs and (motif[-1][-1], motif[0][0]) not in detected_pairs:
+                    with_topics_queue.append(motif)
+                    detected_pairs.append((motif[0][0], motif[-1][-1]))
+                    # visited.append(b)
+            # non_topics = [i for i in non_topics if i not in visited]
         
-        non_topics = [i for i in non_topics if i not in visited]
-        detected_paths_three_hops, detected_paths_four_hops = [], []
-
-        for i in non_topics:
-            for j in detected_paths:
-                s, t = (i[-1], j[0][0]) if j[-1][-1] in q_entities else (j[-1][-1], i[0])
-                motif =  [i]+j if j[-1][-1] in q_entities else j+[i]
-                if s == t:
-                    detected_paths_three_hops.append(motif)
-
-        def score(lst, all_triplets, logits):
-            logit_values = logits[[all_triplets.index(k) for k in lst]]
-            return logit_values.mean().item()
-
-        detected_paths = detected_paths + detected_paths_three_hops
-
+        # for multi-entity questions
+        if len(q_entities) > 1:
+            intersect_modes = intersect_merge(with_topics + detected_paths, q_entities)
+            linear_modes = linear_merge(with_topics + detected_paths, q_entities)
+            detected_paths = intersect_modes + linear_modes
+        
+        detected_paths = [itm for itm in detected_paths if len(itm) > 1 and len(itm) <= 5 and not check_abstract(itm)]
         detected_paths = sorted(detected_paths, 
                                 key=lambda lst: score(lst, all_triplets, logits), 
                                 reverse=True)
-        detected_paths = [p for p in detected_paths if not (p[0][0].startswith('m.') or p[0][0].startswith('g.') or p[-1][-1].startswith('m.') or p[-1][-1].startswith('g.'))]
-
-        # triplet level
         detected_triplets = [all_triplets.index(item) for path in detected_paths for item in path]
-        
-        detected_paths.extend([[all_triplets[i]] for i in select_idx if i not in detected_triplets])
-        detected_triplets.extend([i for i in select_idx if i not in detected_triplets])
-        
-        # TODO: remove duplicated
-        detected_triplets = remove_duplicates(detected_triplets)
+
+        if len(q_entities) == 1:            
+            # add scattered.
+            scattered_idx = [i for i in select_idx if (i not in detected_triplets) and (not check_abstract([all_triplets[i]]))]
+            # scattered_idx = [i for i in select_idx if i not in detected_triplets][:20]
+            detected_paths = detected_paths + [[all_triplets[i]] for i in scattered_idx]
+            detected_triplets.extend([i for i in scattered_idx])
+        if not detected_paths:
+            detected_paths = [[]]
+
+        # detected_triplets = remove_duplicates(detected_triplets)
 
         if self.retrieval_clip:
             final_paths, triplets_budget = [], 0
@@ -354,6 +354,12 @@ class RLRE(nn.Module):
         else:
             return detected_triplets, detected_paths
 
+def score(lst, all_triplets, logits):
+    logit_values = logits[[all_triplets.index(k) for k in lst]]
+    return logit_values.mean().item()
+
+def check_abstract(p):
+    return p[0][0].startswith('m.') or p[0][0].startswith('g.') or p[-1][-1].startswith('m.') or p[-1][-1].startswith('g.')
 
 def remove_duplicates(input_list):
     seen = set()
@@ -380,8 +386,51 @@ def gen_path(G, source, target):
         all_triplets_in_path.append(triplets_in_path)
     return all_triplets_in_path
 
-def triplet_to_str(triplet):
-    return f"({triplet[0]},{triplet[1]},{triplet[2]})"
+def linear_merge(lst, q_entities):
+
+    final, concepts = [], []
+    num = 0
+    for (i,j) in itertools.combinations(lst, 2):
+        num += 1
+        if i[-1][-1] == j[0][0] and i[0][0] != j[-1][-1] and i[0][0] in q_entities and j[-1][-1] in q_entities:
+            motif, conc = i + j, j[0][0]
+        elif i[0][0] == j[-1][-1] and i[-1][-1] != j[0][0] and i[-1][-1] in q_entities and j[0][0] in q_entities:
+            motif, conc = j + i, i[0][0]
+        else:
+            continue
+        if conc not in concepts and motif not in final:
+            final.append(motif)
+            concepts.append(conc)
+    return final
+
+def intersect_merge(lst, q_entities):
+    def check_merge(a, b):
+        if a[-1][-1] == b[-1][-1] and a[0][0] != b[0][0] and a[0][0] in q_entities and b[0][0] in q_entities:
+            return True
+        elif a[0][0] == b[0][0] and a[-1][-1] != b[-1][-1] and a[-1][-1] in q_entities and b[-1][-1] in q_entities:
+            return True
+        else: 
+            return False
+    
+    visited, final, intersects = [], [], []
+    if len(lst) == 1:
+        return intersects
+    for i, motif in enumerate(lst[:-1]):
+        if motif in visited:
+            continue
+        merged, visited = False, []
+        for j in range(i+1, len(lst)):
+            if check_merge(motif, lst[j]):
+                merged = True
+                motif.extend(lst[j])
+                visited.append(lst[j])
+        # final.append(motif)
+
+        if merged:
+            intersects.append(motif)
+    return intersects
+    # final = final if lst[-1] in visited else final + [lst[-1]]
+    # return final, intersects
 
 def get_avg_ranks(all_triples, sorted_indices, ans_list):
     ranks = []
@@ -436,3 +485,44 @@ def get_avg_ranks(all_triples, sorted_indices, ans_list):
         # for dat_id, g in zip(id_batch, generation_batch):
         #     print_log(dat_id, logging)
         #     print_log(g, logging)
+
+
+
+        #     def mask_triplet(self, triplets_batch, select_idx_batch, to_str=True):
+        # """
+        # `strategy` can be set as "drop" or "mask", "drop" as default.
+        # Mask tokenized triplets using attn
+        # # Note this method is achieved based on sample-wise not batch-wise.
+        # # we prefer "drop" strategy with ordered K-sampling w.o. replacement.
+        # """
+        # # Example: triplets converted into strings
+
+        # # Load the tokenizer
+        # def triplet_to_str(triplet):
+        #     return f"({triplet[0]},{triplet[1]},{triplet[2]})"
+        # # Tokenize each triplet string
+        # masked_attns_batch, masked_triplets_batch = [], []
+        # for triplets, keep_idx in zip(triplets_batch, select_idx_batch):
+        # # In this strategy, just drop the unselected triplets.
+        #     # keep_idx = [idx for idx, score in enumerate(attns) if score.item() == 1]
+        #     select_triplets = [triplet_to_str(triplets[idx]) for idx in keep_idx]
+        #     masked_triplets_batch.append(select_triplets)
+        #     # assert attns.shape == triplets_token_ids.shape
+        #     # masked_token_ids = attns * triplets_token_ids
+        # return masked_triplets_batch, masked_attns_batch
+        # # return masked_token_ids
+
+
+            #     for (i,j) in itertools.combinations(with_topics, 2):
+            # # remove self-loop
+            # if i[0] == j[-1] and i[-1] == j[0]:
+            #     to_del = i if i[-1] in q_entities else j
+            # # remove abundant relations for the same entity pair
+            # elif i[0] == j[0] and i[-1] == j[-1]:
+            #     si, sj = logits[all_triplets.index(i)].item(), logits[all_triplets.index(j)].item()
+            #     to_del = j if si > sj else i
+            # else:
+            #     continue
+            # if to_del in with_topics:
+            #     with_topics.remove(to_del)
+            #     select_idx.remove(all_triplets.index(to_del))

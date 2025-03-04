@@ -2,57 +2,32 @@
 Define all prompts used in this project.
 """
 
-ICL_USER_PROMPT_2 = """Triplets:
-(Barbados, location.location.containedby, Caribbean)
-(Netherlands Antilles, location.location.containedby, Caribbean)
+ICL_USER_PROMPT_2 = """Paths:
+Path 0. (Caribbean, location.location.contains, Netherlands Antilles), (Netherlands Antilles, location.country.official_language, Dutch Language)
+Path 1. (Spanish Language, language.human_language.countries_spoken_in, Barbados), (Barbados, location.location.containedby, Caribbean)
+
+Triplets:
 (Cura�ao, location.country.official_language, Dutch Language)
 (Anguilla, location.location.containedby, Caribbean)
 (English Language, language.human_language.countries_spoken_in, Bahamas)
-(Spanish Language, language.human_language.countries_spoken_in, Barbados)
 (Barbados, location.country.languages_spoken, English Language)
 (Barbados, location.location.containedby, British West Indies)
 (Sint Maarten, location.country.official_language, Dutch Language)
 (Caribbean, location.location.contains, British Virgin Islands)
-(Netherlands Antilles, location.country.official_language, Dutch Language)
 (Flemish language, language.human_language.main_country, Belgium)
 
 
 Question:
 Of the countries that are in the Caribbean, which has the Dutch Language as an official language?
-
-
-Hints:
-Caribbean
-Dutch Language
 """
 
 ICL_ASS_PROMPT_2_brief = """ans: Netherlands Antilles
 """
 
-ICL_ASS_PROMPT_2 = """To find the countries in the Caribbean that have Dutch Language as an official language, taking into account the hints, we will look for triplets that link countries to the location 'Caribbean' and also link countries to 'Dutch Language' as their official language.
+ICL_ASS_PROMPT_2 = """To answer the question, we need to identify countries in the Caribbean that have Dutch as an official language. Our first step is to check whether any paths explicitly mention both the Caribbean and the Dutch language.
 
-From the triplets, we can identify the following:
+From the paths, we find that the only country explicitly confirmed to be in the Caribbean with Dutch as an official language is the Netherlands Antilles (based on path 0).
 
-1. Countries in the Caribbean:
-   - Barbados (mentioned in the triplet: 'Barbados', 'location.location.containedby', 'Caribbean')
-   - Netherlands Antilles (mentioned in the triplet: 'Netherlands Antilles', 'location.location.containedby', 'Caribbean')
-   - Anguilla (mentioned in the triplet: 'Anguilla', 'location.location.containedby', 'Caribbean')
-   - British Virgin Islands (mentioned in the triplet: 'Caribbean', 'location.location.contains', 'British Virgin Islands')
-
-2. Countries with Dutch Language as an official language:
-   - Cura�ao (mentioned in the triplet: 'Cura�ao', 'location.country.official_language', 'Dutch Language')
-   - Sint Maarten (mentioned in the triplet: 'Sint Maarten', 'location.country.official_language', 'Dutch Language')
-   - Netherlands Antilles (mentioned in the triplet: 'Netherlands Antilles', 'location.country.official_language', 'Dutch Language')
-
-3. **Construct the sets**:
-   - Caribbean countries: Barbados, Netherlands Antilles, Anguilla, British Virgin Islands
-   - Countries with Dutch Language as an official language: Cura�ao, Sint Maarten, Netherlands Antilles
-
-4. **Strict set intersection**: When finding the intersection of the two sets, we only include entities that appear in both sets. Do **not** include entities that only appear in one set.
-   - Netherlands Antilles
-
-In this process, we **strictly use** the entities mentioned in the triplets, and **ensure that only entities that appear in both sets are included in the intersection**.
-   
 Therefore, the answer is:
 
 ans: Netherlands Antilles
@@ -179,9 +154,19 @@ ans: 2014 (2014 World Series)
 ans: 2012 (2012 World Series)
 ans: 2010 (2010 World Series)"""
 
+SYS_PROMPT = (
+    "Given reasoning paths and triplets retrieved from a knowledge graph, please answer the question."
+   #  " Each triplet consists of two entities connected by a relation, and each path is a sequence of triplets forming a reasoning chain that may or may not contribute to an answer."
+   #  " In addition to paths, there are scattered triplets that provide supplementary information, though a single triplet alone may be insufficient to fully answer the question."
+   #  " You will be provided with hints containing a list of entities extracted from the question. When answering the question, prioritize considering paths or triplets that explicitly mention these entities."
+   #  " Each triplet consists of two entities connected by a relation, and each path is a sequence of triplets forming a multi-hop reasoning chain."
+   #  " Only a subset of the given information is relevant for answering the question."
+    ' Please return formatted answers, each on a new line and prefixed with "ans:".'
+)
+
 # SYS_PROMPT = (
 #     "Based on the triplets retrieved from a knowledge graph, please answer the question."
-#     ' Please return formatted answers as a list, each prefixed with "ans:".'
+#     ' Please return formatted answers, each on a new line and prefixed with "ans:".'
 # )
 
 # SYS_PROMPT = (
@@ -210,13 +195,13 @@ SYS_PROMPT_brief_path_level_inf = (
 " 4. You only need to return the answer(s), each on a new line and prefixed with 'ans:'. If no answer can be derived from the given paths, simply return 'ans: Not available'."
 )
 
-SYS_PROMPT = (
-"Based solely on the provided triplets, please answer the question. Pay special attention to the following:"
-" 1. You will be provided with hints containing a list of entities which are extracted from the question. When answering the question, prioritize considering triplets that explicitly mention these entities. This will help you focus on relevant context for generating the most accurate response."
-" 2. If the triplet you identify links the hint entity to an abstract identifier like 'm.0hpny13', simply look for other triplets involving this abstract entity, as it often acts as a bridge connecting the question entities to the answer." 
-" 3. When answering the question, only use the information provided in the triplets. Do not rely on your inherent knowledge. Only the entities, relationships, and facts in the triplets are allowed to be used in your reasoning process."
-" 4. After thinking, return your answer(s), each on a new line and prefixed with 'ans:', like 'ans: A'. If no answers are found from the given triplets, return 'ans: Not available'."
-)
+# SYS_PROMPT = (
+# "Based on the provided triplets, please answer the question. Pay special attention to the following:"
+# " 1. You will be provided with hints containing a list of entities which are extracted from the question. When answering the question, prioritize considering triplets that explicitly mention these entities. This will help you focus on relevant context for generating the most accurate response."
+# " 2. If the triplet you identify links the hint entity to an abstract identifier like 'm.0hpny13', simply look for other triplets involving this abstract entity, as it often acts as a bridge connecting the question entities to the answer." 
+# # " 3. When answering the question, only use the information provided in the triplets. Do not rely on your inherent knowledge. Only the entities, relationships, and facts in the triplets are allowed to be used in your reasoning process."
+# " 3. After thinking, return your answer(s), each on a new line and prefixed with 'ans:', like 'ans: A'. If no answers are found from the given triplets, return 'ans: Not available'."
+# )
 
 
 COT_PROMPT = (

@@ -33,9 +33,10 @@ def inference(cfre, test_loader, log_dir, ):
     loggings = opj(log_dir, "logging.txt")
     all_loss_dict_val, to_preserve = {}, []
     with torch.no_grad():
-        for batch in test_loader:
+        for batch in tqdm(test_loader):
             cfre.preparing(batch)
-    
+    torch.save(cfre.evaluation, opj(log_dir, f"inference-ret-{cfre.K}.pth"))
+    print("Done")
     results = global_loop.run_until_complete(inference_core(cfre, test_loader, log_dir))
 
     for loss_dict in results:
