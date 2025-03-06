@@ -273,20 +273,18 @@ class RLRE(nn.Module):
         if len(all_triplets) < 5:
             return select_idx, [[all_triplets[i]] for i in select_idx]
         def to_match(topic, n_topic):
-            assert type(topic) is list and type(n_topic) is list
             s, t, dc = (topic[-1][-1], n_topic[0][0], n_topic[-1][-1]) if topic[0][0] in q_entities else (n_topic[-1][-1], topic[0][0], n_topic[0][0])
             motif = topic+n_topic if topic[0][0] in q_entities else n_topic+topic
             dc_lst = [t for p in topic for t in p]
             return motif if (s == t) and (dc not in dc_lst) else None
 
-        # TODO: retrieval cleaning, can also done before select.
         for (i,j) in itertools.combinations(select_idx, 2):
             ti, tj = all_triplets[i], all_triplets[j]
             # remove self-loop
-            if ti[0] == tj[-1] and ti[-1] == tj[0] and (ti[0] in q_entities or ti[-1] in q_entities):
-                to_del = i if ti[-1] in q_entities else j
+            # if ti[0] == tj[-1] and ti[-1] == tj[0] and (ti[0] in q_entities or ti[-1] in q_entities):
+            #     to_del = i if ti[-1] in q_entities else j
             # remove abundant relations for the same entity pair
-            elif ti[0] == tj[0] and ti[-1] == tj[-1]:
+            if ti[0] == tj[0] and ti[-1] == tj[-1]:
                 si, sj = logits[i].item(), logits[i].item()
                 to_del = j if si > sj else i
             else:
@@ -309,9 +307,7 @@ class RLRE(nn.Module):
             seg = with_topics_queue.popleft()
             if len(seg) > 1 and seg not in detected_paths:
                 detected_paths.append(seg)
-            # if len(seg) > 2:
-            #     continue
-            # visited = []
+
             for b in non_topics:
                 motif = to_match(seg, b)
                 if motif and (motif[0][0], motif[-1][-1]) not in detected_pairs and (motif[-1][-1], motif[0][0]) not in detected_pairs:
@@ -324,20 +320,22 @@ class RLRE(nn.Module):
         if len(q_entities) > 1:
             intersect_modes = intersect_merge(with_topics + detected_paths, q_entities)
             linear_modes = linear_merge(with_topics + detected_paths, q_entities)
-            detected_paths = intersect_modes + linear_modes
+            # TODO: detected paths not covering intergrated paths
+            detected_paths = intersect_modes + linear_modes + detected_paths[:10]
         
-        detected_paths = [itm for itm in detected_paths if len(itm) > 1 and len(itm) <= 5 and not check_abstract(itm)]
+        detected_paths = [itm for itm in detected_paths if not check_abstract(itm)]
         detected_paths = sorted(detected_paths, 
                                 key=lambda lst: score(lst, all_triplets, logits), 
                                 reverse=True)
         detected_triplets = [all_triplets.index(item) for path in detected_paths for item in path]
 
-        if len(q_entities) == 1:            
-            # add scattered.
+        if len(q_entities) == 1:
+            # add scattered, refine scattere abstract ifentifiers
             scattered_idx = [i for i in select_idx if (i not in detected_triplets) and (not check_abstract([all_triplets[i]]))]
-            # scattered_idx = [i for i in select_idx if i not in detected_triplets][:20]
+            # scattered_idx = [i for i in select_idx if i not in detected_triplets]
             detected_paths = detected_paths + [[all_triplets[i]] for i in scattered_idx]
             detected_triplets.extend([i for i in scattered_idx])
+        
         if not detected_paths:
             detected_paths = [[]]
 
@@ -448,21 +446,6 @@ def get_avg_ranks(all_triples, sorted_indices, ans_list):
     if len(ans_list_) > 0:
         ranks += [len(sorted_indices)] * len(ans_list_)
     return -np.mean(ranks)
-
-
-    # TODO: Path level
-    # detected_triplets = [item for path in detected_paths for item in path]
-    # scattered_triplets = [[all_triplets[i]] for i in select_idx if all_triplets[i] not in detected_triplets]
-    # detected_paths.extend(scattered_triplets)
-
-    # final_paths = []
-    # triplets_budget = 0
-    # for i in detected_paths:
-    #     final_paths.append(i)
-    #     triplets_budget += len(i)
-    #     if triplets_budget > len(select_idx):
-    #         break
-    # return final_paths
 
 
     # order 2. scattered topics + detected + scattered non-topics
