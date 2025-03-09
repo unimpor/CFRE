@@ -272,6 +272,7 @@ class RLRE(nn.Module):
     def reorganize(self, all_triplets, q_entities, select_idx, logits, ):
         if len(all_triplets) < 5:
             return select_idx, [[all_triplets[i]] for i in select_idx]
+        
         def to_match(topic, n_topic):
             s, t, dc = (topic[-1][-1], n_topic[0][0], n_topic[-1][-1]) if topic[0][0] in q_entities else (n_topic[-1][-1], topic[0][0], n_topic[0][0])
             motif = topic+n_topic if topic[0][0] in q_entities else n_topic+topic
@@ -285,7 +286,7 @@ class RLRE(nn.Module):
             #     to_del = i if ti[-1] in q_entities else j
             # remove abundant relations for the same entity pair
             if ti[0] == tj[0] and ti[-1] == tj[-1]:
-                si, sj = logits[i].item(), logits[i].item()
+                si, sj = logits[i].item(), logits[j].item()
                 to_del = j if si > sj else i
             else:
                 continue
@@ -387,16 +388,16 @@ def gen_path(G, source, target):
 def linear_merge(lst, q_entities):
 
     final, concepts = [], []
-    num = 0
     for (i,j) in itertools.combinations(lst, 2):
-        num += 1
+        if check_abstract(i) or check_abstract(j):
+            continue
         if i[-1][-1] == j[0][0] and i[0][0] != j[-1][-1] and i[0][0] in q_entities and j[-1][-1] in q_entities:
             motif, conc = i + j, j[0][0]
         elif i[0][0] == j[-1][-1] and i[-1][-1] != j[0][0] and i[-1][-1] in q_entities and j[0][0] in q_entities:
             motif, conc = j + i, i[0][0]
         else:
             continue
-        if conc not in concepts and motif not in final:
+        if (conc not in concepts) and (motif not in final):
             final.append(motif)
             concepts.append(conc)
     return final
@@ -427,8 +428,6 @@ def intersect_merge(lst, q_entities):
         if merged:
             intersects.append(motif)
     return intersects
-    # final = final if lst[-1] in visited else final + [lst[-1]]
-    # return final, intersects
 
 def get_avg_ranks(all_triples, sorted_indices, ans_list):
     ranks = []
