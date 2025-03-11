@@ -206,8 +206,8 @@ class RLRE(nn.Module):
             # self.evaluation[d] = {"selected": s}
             
     def forward_pass(self, batch, epoch, training=True): 
-        graph_batch, answer_batch, triplet_batch, triplet_batch_idx, relevant_idx_batch, question_batch, q_embd_batch, id_batch, shortest_path_idx_batch = \
-            batch["graph"], batch["a_entity"], batch["triplets"], batch['triplet_batch_idx'], batch["relevant_idx"], batch["q"], batch["q_embd"], batch["id"], batch["shortest_path_idx"]
+        graph_batch, answer_batch, triplet_batch, triplet_batch_idx, relevant_idx_batch, question_batch, q_embd_batch, id_batch, shortest_path_idx_batch, hints_batch = \
+            batch["graph"], batch["a_entity"], batch["triplets"], batch['triplet_batch_idx'], batch["relevant_idx"], batch["q"], batch["q_embd"], batch["id"], batch["shortest_path_idx"], batch["q_entity"]
         hard_idx_batch, relevant_idx_in_path_batch = batch["hard_idx"], batch["relevant_idx_in_path"]
 
         graph_batch, q_embd_batch = \
@@ -220,11 +220,15 @@ class RLRE(nn.Module):
         for i, dat_id in enumerate(id_batch):
             attn_logit = attn_logits_batch[triplet_batch_idx == i]
             logits_batch.append(attn_logit)
-            select_idx = self.sampling_v3(attn_logit, K=self.K if not training else 200)
-
-            hard_idx, pos_idx = hard_idx_batch[i], relevant_idx_batch[i]
-            hard_idx = [i for i in hard_idx if i in select_idx]
-            hard_idx_batch_.append(hard_idx)
+            select_idx = self.sampling_v3(attn_logit, K=self.K if not training else 250)
+            all_triplets, q_entities = triplet_batch[i], hints_batch[i]
+            # hard_idx, pos_idx = hard_idx_batch[i], relevant_idx_batch[i]
+            # hard_idx = [i for i in hard_idx if i in select_idx]
+            if training:
+                hard_idx = []
+                if len(all_triplets) > 10:
+                    hard_idx = self.reorganize(all_triplets, q_entities, select_idx, attn_logit, training_mode=True)
+                hard_idx_batch_.append(hard_idx)
 
             if not training:
                 all_triplets, ans_list = triplet_batch[i], answer_batch[i]
@@ -242,7 +246,6 @@ class RLRE(nn.Module):
             reward_loggings = {k:np.mean(v).item() for k,v in reward_loggings.items()}
             return 0, reward_loggings
         
-        # loss, reward_loggings = self.cal_loss(logits_batch, relevant_idx_batch, relevant_idx_in_path_batch, epoch=epoch)
         loss, reward_loggings = self.cal_loss_with_weights(logits_batch, relevant_idx_batch, hard_idx_batch_)
         return loss, reward_loggings
 
@@ -270,7 +273,7 @@ class RLRE(nn.Module):
         #     positive_indices = sorted_indices[:K]
         return None, positive_indices.tolist()
 
-    def reorganize(self, all_triplets, q_entities, select_idx, logits, ):
+    def reorganize(self, all_triplets, q_entities, select_idx, logits, training_mode=False):
         if len(all_triplets) < 5:
             return [str(all_triplets[i]).replace("'", "") for i in select_idx], [[all_triplets[i]] for i in select_idx]
         
@@ -295,7 +298,7 @@ class RLRE(nn.Module):
                 continue
             select_idx = [k for k in select_idx if k != to_del]
 
-        with_topics, non_topics, detected_paths, logic2path  = [], [], [], defaultdict(set)
+        with_topics, non_topics, detected_paths, logic2path, visited  = [], [], [], defaultdict(set), []
         for idx in select_idx:
             triple = all_triplets[idx]
             if triple[0] in q_entities or triple[-1] in q_entities:
@@ -304,6 +307,7 @@ class RLRE(nn.Module):
                 non_topics.append(triple)
         
         detected_pairs = [(t[0], t[-1]) for t in with_topics] + [(t[-1], t[0]) for t in with_topics]
+
         non_topics, with_topics = [[itm] for itm in non_topics], [[itm] for itm in with_topics]
         with_topics_queue = deque(with_topics)
 
@@ -311,16 +315,17 @@ class RLRE(nn.Module):
         while with_topics_queue:
             seg = with_topics_queue.popleft()
             if seg not in detected_paths and extract_(seg)[1][:2] not in ['m.', 'g.']:
+                visited.extend(seg)
                 detected_paths.append(seg)
 
             for b in non_topics:
                 motif = to_match(seg, b)
-                # TODO: we may permit multiple shortest paths in detected paris.
                 if motif and (motif[0][0], motif[-1][-1]) not in detected_pairs:
                     with_topics_queue.append(motif)
                     detected_pairs.append((motif[0][0], motif[-1][-1]))
                     detected_pairs.append((motif[-1][-1], motif[0][0]))
-
+        if training_mode:
+            return [idx for idx in select_idx if all_triplets[idx] not in visited]
         detected_paths = sorted(detected_paths, 
                                 key=lambda lst: score(lst, all_triplets, logits), 
                                 reverse=True)
@@ -339,7 +344,8 @@ class RLRE(nn.Module):
         
         # multi-entity
         detected_paths = merging_(detected_paths, q_entities)
-        detected_paths = [i for i in detected_paths if len(i) > 1]
+        # 30 or 40 both are fine.
+        detected_paths = [i for i in detected_paths if len(i) > 1][:30] + [i for i in detected_paths if len(i) == 1]
         # with budget
         # count_single, count_multi = 0, 0
         # result_paths = []
@@ -433,9 +439,10 @@ def merging_(lst_, q_entities):
         motif = [i if not isinstance(i, set) else final_targets for i in motif]
         motif = [tuple(motif[i:i+3]) for i in range(0, len(motif), 3)]
 
-        if motif in intersects:
-            continue
-
+        if motif not in intersects:
+            visited.append(lst[i])
+            intersects.append(motif)
+    
     return intersects
 
 

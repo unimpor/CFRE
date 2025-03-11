@@ -99,11 +99,11 @@ class LLMs(nn.Module):
                 if len(path) == 1:
                     break
                 formatted_path = f"Path {i}. "
-                formatted_path += ', '.join([triplet_to_str(triplet) for triplet in path])
+                formatted_path += ', '.join([str(triplet) for triplet in path])
                 formatted_paths.append(formatted_path)
-            triplets_or_paths = [triplet_to_str(item[0]) for item in triplets_or_paths if len(item) == 1]
+            triplets_or_paths = [str(item[0]) for item in triplets_or_paths if len(item) == 1]
             if len(triplets_or_paths) > 0:
-                triplet_prompt = "Paths:\n" + "\n".join(formatted_paths) + '\n' + "Scattered Triplets:\n" + "\n".join(triplets_or_paths)
+                triplet_prompt = "Paths:\n" + "\n".join(formatted_paths) + '\n\n' + "Scattered Triplets:\n" + "\n".join(triplets_or_paths)
             else:
                 triplet_prompt = "Paths:\n" + "\n".join(formatted_paths)
         

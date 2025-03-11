@@ -36,7 +36,6 @@ def inference(cfre, test_loader, log_dir, ):
         for batch in tqdm(test_loader):
             cfre.preparing(batch)
     torch.save(cfre.evaluation, opj(log_dir, f"inference-ret-{cfre.K}.pth"))
-    print("Done")
     results = global_loop.run_until_complete(inference_core(cfre, test_loader, log_dir))
 
     for loss_dict in results:
@@ -132,7 +131,7 @@ def main():
     parser.add_argument('--algo', type=str, default="v2")
     parser.add_argument('--reorder', action='store_true', help='reorder the triplets')
     parser.add_argument('--gumbel_strength', type=float, default=1)
-    parser.add_argument('--opath', type=str, default="paths storing oracle index")
+    parser.add_argument('--opath', type=str, default=None)
     parser.add_argument('--hpath', type=str, default=None)
     parser.add_argument('--inf_level', type=str, default="triplet")
     parser.add_argument('--comp', action='store_true', help='compliment version for test inference')
