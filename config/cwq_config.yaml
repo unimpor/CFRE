@@ -1,0 +1,83 @@
+dataset:
+  name: &dataset 'cwq'
+  root: ./datasets
+  emb_name: 'gte-large-en-v1.5'
+  post_filter: "metrics_rev_scored_100.pth"
+  skip_no_path: True
+
+env:
+  seed: 42
+  device: &device 'cuda:0'
+
+# Llama-3.2-1B-Instruct
+llms:
+  data_name: *dataset
+  device: *device
+  cot: True
+  llm_frozen: False  # deprecated
+  level: triplet
+  llm_model_name_or_path: &llm 'meta-llama/Meta-Llama-3.1-8B-Instruct' # optional: gpt-4o-mini
+  tensor_parallel_size: 1
+  max_seq_len_to_capture: 16384 
+  max_tokens: 4000
+  seed: 42
+  temperature: 0
+  frequency_penalty: 0.16  # 0.14 for web, 0.16 for cwq
+  prompt_mode: sys_icl_dc
+  gpu_memory_utilization: 0.9
+  
+train:
+  warmup:
+    lr: 0.001
+    wd: 0.
+    num_epochs: 100
+    patience: 10
+  lr_ret: 1e-3
+  wd_ret: 0.
+  lr_llm: 1e-5  # deprecated
+  wd_llm: 0.05  # deprecated
+  num_epochs: 500
+  patience: 10
+  batch_size: 16
+  grad_steps: 5 # deprecated
+  llm_frozen_epoch: 5 # deprecated
+  
+# graphsage
+retriever:
+  model_type: &gnn DDE
+  topic_pe: True
+  hidden_size: &hidden_size 1024
+  output_size: 1
+  learn_non_text: False
+  DDE:
+    num_rounds: 2
+    num_reverse_rounds: 2
+  PNA:
+    emb_size: *hidden_size
+    num_layers: 3
+
+algorithm:
+  filtering: topk # "topk" or "idp-bern"
+  filtering_num_or_ratio: 0.7 # int or float
+  triplet2text: drop # "drop" or "mask"
+  coeff1: 0.1
+  coeff2: 0.1
+  reward_metrics: "F1"
+  perturb_per_sample: 1
+  regularize: null
+  set_moving_baseline: False
+  tau: 2.0
+  # constant_ratio: 0.3 # deprecated
+  gumbel_strength: 1.0
+  baseline_order_invariant: True
+  algo: v4
+  ret_num: 100
+  ret_train: 100
+
+
+logging:
+  root: ./logging
+  dataset: *dataset
+  llm: *llm
+  ret: *gnn
+

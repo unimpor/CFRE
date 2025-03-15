@@ -89,7 +89,7 @@ class LLMs(nn.Module):
         """
         Generation conversation given a query-triplet pair.
         """
-        if type(triplets_or_paths[0]) is str:
+        if not triplets_or_paths or type(triplets_or_paths[0]) is str:
             # triplet level prompt
             triplet_prompt = "Triplets:\n" + "\n".join(triplets_or_paths)
         elif type(triplets_or_paths[0]) is list:

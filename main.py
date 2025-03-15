@@ -126,6 +126,7 @@ def main():
     parser.add_argument('--tau', type=float, default=1)
     parser.add_argument('--penalty', type=float, default=0.16)
     parser.add_argument('--ret_num', type=int, default=100)
+    parser.add_argument('--ret_train', type=int, default=100)
     parser.add_argument('--output_size', type=int, default=1)
     parser.add_argument('--start', type=int, default=0, help="start of the training epoch.")
     parser.add_argument('--algo', type=str, default="v2")

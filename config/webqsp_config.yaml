@@ -1,5 +1,5 @@
 dataset:
-  name: &dataset 'cwq'
+  name: &dataset 'webqsp'
   root: ./datasets
   emb_name: 'gte-large-en-v1.5'
   post_filter: "metrics_rev_scored_100.pth"
@@ -11,17 +11,20 @@ env:
 
 # Llama-3.2-1B-Instruct
 llms:
+  data_name: *dataset
   device: *device
+  cot: True
   llm_frozen: False  # deprecated
-  # llm_model_path: meta-llama/Llama-3.2-1B-Instruct
+  level: triplet
   llm_model_name_or_path: &llm 'meta-llama/Meta-Llama-3.1-8B-Instruct' # optional: gpt-4o-mini
   tensor_parallel_size: 1
   max_seq_len_to_capture: 16384 
-  max_tokens: 4000 
-  seed: 0 
+  max_tokens: 4000
+  seed: 42
   temperature: 0
-  frequency_penalty: 0.14
-  prompt_mode: sys_icl_dc_reverse
+  frequency_penalty: 0.14  # 0.14 for web, 0.16 for cwq
+  prompt_mode: sys_icl_dc
+  gpu_memory_utilization: 0.9
   
 train:
   warmup:
@@ -33,8 +36,8 @@ train:
   wd_ret: 0.
   lr_llm: 1e-5  # deprecated
   wd_llm: 0.05  # deprecated
-  num_epochs: 30
-  patience: 10
+  num_epochs: 500
+  patience: 20
   batch_size: 16
   grad_steps: 5 # deprecated
   llm_frozen_epoch: 5 # deprecated
@@ -44,6 +47,7 @@ retriever:
   model_type: &gnn DDE
   topic_pe: True
   hidden_size: 1024
+  output_size: 1
   learn_non_text: False
   DDE:
     num_rounds: 2
@@ -51,22 +55,21 @@ retriever:
 
 algorithm:
   filtering: topk # "topk" or "idp-bern"
-  filtering_num_or_ratio: 100 # int or float
+  filtering_num_or_ratio: 0.7 # int or float
   triplet2text: drop # "drop" or "mask"
-  # grad_normalize: True  # deprecated
-  # gumbel: True # deprecated
-  # warmup: False # deprecated
-  # warmup_epochs: 15 # deprecated
   coeff1: 0.1
   coeff2: 0.1
-  reward_metrics: "recall"
+  reward_metrics: "F1"
   perturb_per_sample: 1
-  regularize: "wp"
+  regularize: null
   set_moving_baseline: False
   tau: 2.0
   # constant_ratio: 0.3 # deprecated
   gumbel_strength: 1.0
   baseline_order_invariant: True
+  algo: v4
+  ret_num: 100
+  ret_train: 100
 
 
 logging:

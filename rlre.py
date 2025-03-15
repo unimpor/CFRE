@@ -27,6 +27,7 @@ class RLRE(nn.Module):
         self.metrics_name = config["reward_metrics"]
         self.reward_metrics = RewardMetrics(self.metrics_name)
         self.K = config["ret_num"]
+        self.Ktrain = config["ret_train"]
         self.evaluation = {}
         # hard negatives
         self.add_hard = kwargs.get("add_hard", True)
@@ -36,7 +37,7 @@ class RLRE(nn.Module):
         self.retrieval_clip = kwargs.get("clipping", False)
         self.budget = kwargs.get("budget", 100)
         self.level = kwargs.get("level", "triplet")
-        print(self.budget, self.retrieval_clip, self.reorder, self.level)
+        print(self.add_hard, self.reorder, self.level, self.K, self.Ktrain)
         
     @property
     def device(self):
@@ -215,20 +216,19 @@ class RLRE(nn.Module):
 
         attn_logits_batch = self.retriever(graph_batch, q_embd_batch)  # [B, N]
         logits_batch, hard_idx_batch_ = [], []
-        reward_loggings = {"recall": [], "step": [], "ranking": []}
+        reward_loggings = {"recall": [], "step": [], "ranking": [], "hard_len": []}
         
         for i, dat_id in enumerate(id_batch):
             attn_logit = attn_logits_batch[triplet_batch_idx == i]
             logits_batch.append(attn_logit)
-            select_idx = self.sampling_v3(attn_logit, K=self.K if not training else 250)
+            select_idx = self.sampling_v3(attn_logit, K=self.Ktrain)
             all_triplets, q_entities = triplet_batch[i], hints_batch[i]
             # hard_idx, pos_idx = hard_idx_batch[i], relevant_idx_batch[i]
             # hard_idx = [i for i in hard_idx if i in select_idx]
-            if training:
-                hard_idx = []
-                if len(all_triplets) > 10:
-                    hard_idx = self.reorganize(all_triplets, q_entities, select_idx, attn_logit, training_mode=True)
-                hard_idx_batch_.append(hard_idx)
+            hard_idx = []
+            if len(all_triplets) > 10 and self.add_hard:
+                hard_idx = self.reorganize(all_triplets, q_entities, select_idx, attn_logit, training_mode=True)
+            hard_idx_batch_.append(hard_idx)
 
             if not training:
                 all_triplets, ans_list = triplet_batch[i], answer_batch[i]
@@ -241,11 +241,13 @@ class RLRE(nn.Module):
                 reward_loggings["recall"].append(float(len(recall) / len(ans_list)))
                 reward_loggings["step"].append(float(len(step) / len(selected_triplets)))
                 reward_loggings["ranking"].append(get_avg_ranks(all_triplets, select_idx, ans_list))
+                reward_loggings["hard_len"].append(-len(hard_idx))
                 
         if not training:
             reward_loggings = {k:np.mean(v).item() for k,v in reward_loggings.items()}
             return 0, reward_loggings
         
+        # loss, reward_loggings = self.cal_loss(logits_batch, relevant_idx_batch, relevant_idx_in_path_batch, epoch=epoch)
         loss, reward_loggings = self.cal_loss_with_weights(logits_batch, relevant_idx_batch, hard_idx_batch_)
         return loss, reward_loggings
 
@@ -345,15 +347,15 @@ class RLRE(nn.Module):
         # multi-entity
         detected_paths = merging_(detected_paths, q_entities)
         # 30 or 40 both are fine.
-        detected_paths = [i for i in detected_paths if len(i) > 1][:30] + [i for i in detected_paths if len(i) == 1]
+        if self.llms.model_name == "gpt-4o-mini" and self.llms.data_name == 'cwq':
+            detected_paths = [i for i in detected_paths if len(i) > 1][:30] + [i for i in detected_paths if len(i) == 1]
         # with budget
-        # count_single, count_multi = 0, 0
+        # count_multi = 0
         # result_paths = []
         # for p in detected_paths:
-        #     if len(p) == 1 and count_single < 20:
+        #     if len(p) == 1:
         #         result_paths.append(p)
-        #         count_single += 1
-        #     elif len(p) > 1 and count_multi < 20:
+        #     elif len(p) > 1 and count_multi < 10:
         #         result_paths.append(p)
         #         count_multi += 1
 
