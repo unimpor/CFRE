@@ -47,15 +47,13 @@ class RetrievalDataset:
             if self.hard_path:
                 hard_paths_cache = torch.load(self.hard_path)
         # only for the need of test
-        if self.split == "test":
-            filtering_id = torch.load("datasets/cwq/processed/test_filtering_bad_ids.pth") + torch.load("datasets/cwq/processed/test_filtering_bad_ids2.pth")
-        processed_data = []
+        processed_data, filtering_ids = [], []
+        if self.split == "test" and self.post_filter:
+            filtering_ids = torch.load(f"datasets/{self.data_name}/processed/test_filtering_bad_ids.pth")
         for sample in raw_data:
             sample_id = sample['id']
             sample_embd = embs.get(sample_id, None)
-            if not sample_embd:
-                continue            
-            if self.split == "test" and self.post_filter and sample_id in filtering_id:
+            if not sample_embd or sample_id in filtering_ids:
                 continue
             # shortest path: [path0, path1, ...]
             # dat: [0, -1, 1]
@@ -304,7 +302,7 @@ class RetrievalDataset:
         # nx.draw_networkx_edges(G, pos, arrowstyle="-|>", arrowsize=15, edge_color="gray", connectionstyle="arc3,rad=0.1")
 
         # edge_labels = nx.get_edge_attributes(G, "relation")
-        # nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, font_size=10, font_color="red", label_pos=0.5)
+        # nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, font_size=20, font_color="red", label_pos=0.5)
 
         nx.draw(G, pos, with_labels=True, node_color="skyblue", node_size=1500, font_size=8, font_color="black")
 
@@ -324,14 +322,13 @@ class RetrievalDatasetWithoutEmb(RetrievalDataset):
 
     def process(self, raw_data):
         print("begin")
-        preserve = list(torch.load("logging/cwq/gpt-4o-mini/DDE/path-level-detection/inference-ret-50.pth").keys())
+        # preserve = list(torch.load("logging/cwq/gpt-4o-mini/DDE/path-level-detection/inference-ret-50.pth").keys())
         processed_data = []
-        # only for the need of training
-        shortest_paths_cache = torch.load("datasets/cwq/processed/shortest_path.pth")
+        shortest_paths_cache = torch.load(f"datasets/{self.data_name}/processed/shortest_path.pth")
         for sample in raw_data:
             sample_id = sample['id']
-            if self.split == "test" and sample_id not in preserve:
-                continue
+            # if self.split == "test" and sample_id not in preserve:
+            #     continue
             # if sample_id not in ["WebQTest-2008_8c6b952c6bd963f0ece4e401c9eb731a", 
             #                      "WebQTrn-2518_1ef15e22372df70baf01b72850deb14d", 
             #                      "WebQTest-415_b6ad66a3f1f515d0688c346e16d202e6",
@@ -412,7 +409,7 @@ class RetrievalDatasetWithoutEmb(RetrievalDataset):
                 "graph": Data(x=x, edge_attr=edge_attr, edge_index=edge_index.long())
             }
             processed_data.append(processed_sample)
-        # torch.save(scored_data, opj(self.root, self.data_name, "processed", f"{self.data_name}_241028_{self.split}_path1.pth"))
+        # torch.save(scored_data, opj(self.root, self.data_name, "processed", f"{self.data_name}_242028_{self.split}_path1.pth"))
         # torch.save(shortest_paths_cache, opj(self.root, self.data_name, "processed", f"shortest_path.pth"))
         # input("success")
         return split_samples(processed_data)
@@ -426,11 +423,11 @@ def split_samples(processed_samples):
     for processed_sample in processed_samples:
         relevant_paths = processed_sample["relevant_paths"]
         
-        if len(relevant_paths) > 10:
-            num_chunks = (len(relevant_paths) + 9) // 10
+        if len(relevant_paths) > 20:
+            num_chunks = (len(relevant_paths) + 9) // 20
             
             for i in range(num_chunks):
-                chunk_paths = relevant_paths[i * 10: (i + 1) * 10]
+                chunk_paths = relevant_paths[i * 20: (i + 1) * 20]
                 new_sample = deepcopy(processed_sample)
                 
                 new_sample["id"] = f"{processed_sample['id']}+{i}"

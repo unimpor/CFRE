@@ -333,7 +333,7 @@ class RLRE(nn.Module):
                                 reverse=True)
         # multi-answer
         for p in detected_paths:
-            p_ = tuple(chain.from_iterable(p))
+            p_ = list(chain.from_iterable(p))
             logics, target = (p_[:-1], {p_[-1]}) if p_[0] in q_entities else (p_[1:], {p_[0]})
             logic2path[logics].update(target)
 
@@ -349,15 +349,6 @@ class RLRE(nn.Module):
         # 30 or 40 both are fine.
         if self.llms.model_name == "gpt-4o-mini" and self.llms.data_name == 'cwq':
             detected_paths = [i for i in detected_paths if len(i) > 1][:30] + [i for i in detected_paths if len(i) == 1]
-        # with budget
-        # count_multi = 0
-        # result_paths = []
-        # for p in detected_paths:
-        #     if len(p) == 1:
-        #         result_paths.append(p)
-        #     elif len(p) > 1 and count_multi < 10:
-        #         result_paths.append(p)
-        #         count_multi += 1
 
         detected_triplets = [str(item).replace("'", "") for path in detected_paths for item in path]
 
