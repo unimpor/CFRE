@@ -33,12 +33,12 @@ class SAGEConv(MessagePassing):
 class SAGE(nn.Module):
     def __init__(self,
                  emb_size,
-                 num_gnn_layers,
-                 aggr):
+                 num_layers,
+                 aggr='mean'):
         super().__init__()
 
         self.gnn_layer_list = nn.ModuleList()
-        for _ in range(num_gnn_layers):
+        for _ in range(num_layers):
             self.gnn_layer_list.append(SAGEConv(emb_size, aggr))
         # TODO: Deprecated Function.
 
@@ -52,11 +52,11 @@ class SAGE(nn.Module):
         # if self.topic_pe:
         #     self.out_size += 2
 
-    def forward(self,
-                edge_index,
+    def forward(self,  
                 # topic_entity_one_hot,
                 h_e,
                 h_r,
+                edge_index,
                 **kwargs):
         # if self.topic_pe:
         #     h_e_list = [topic_entity_one_hot]
@@ -80,8 +80,7 @@ class SAGE(nn.Module):
 class PNA(nn.Module):
     def __init__(self,
                  emb_size,
-                 num_gnn_layers,
-                 **kwargs):
+                 num_layers):
         super().__init__()
 
         aggregators = ['mean', 'min', 'max', 'std']
@@ -90,7 +89,7 @@ class PNA(nn.Module):
         
         self.gnn_layer_list = nn.ModuleList()
         self.batch_norms = nn.ModuleList()
-        for _ in range(num_gnn_layers):
+        for _ in range(num_layers):
             conv = PNAConv(in_channels=emb_size, out_channels=emb_size,
                            aggregators=aggregators, scalers=scalers, deg=deg,
                            edge_dim=emb_size, towers=4, pre_layers=1, post_layers=1,
@@ -103,10 +102,10 @@ class PNA(nn.Module):
         #     self.out_size += 2
 
     def forward(self,
-                edge_index,
                 # topic_entity_one_hot,
                 h_e,
                 h_r,
+                edge_index,
                 **kwargs):
         
         h_e_list = []

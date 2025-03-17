@@ -331,11 +331,17 @@ class RLRE(nn.Module):
         detected_paths = sorted(detected_paths, 
                                 key=lambda lst: score(lst, all_triplets, logits), 
                                 reverse=True)
+        # if self.llms.data_name == 'webqsp':
+        #     visited = [tp for p in detected_paths for tp in p]
+        #     detected_paths.extend([tp for tp in non_topics if tp[0] not in visited][:50])
         # multi-answer
         for p in detected_paths:
             p_ = list(chain.from_iterable(p))
             logics, target = (p_[:-1], {p_[-1]}) if p_[0] in q_entities else (p_[1:], {p_[0]})
-            logic2path[logics].update(target)
+            for i in range(1, len(logics) - 1):
+                if logics[i].startswith(('m.', 'g.')):
+                    logics[i] = 'm.xxxxxx'
+            logic2path[tuple(logics)].update(target)
 
         detected_paths = []
 
@@ -347,7 +353,7 @@ class RLRE(nn.Module):
         # multi-entity
         detected_paths = merging_(detected_paths, q_entities)
         # 30 or 40 both are fine.
-        if self.llms.model_name == "gpt-4o-mini" and self.llms.data_name == 'cwq':
+        if self.llms.data_name == 'cwq':
             detected_paths = [i for i in detected_paths if len(i) > 1][:30] + [i for i in detected_paths if len(i) == 1]
 
         detected_triplets = [str(item).replace("'", "") for path in detected_paths for item in path]

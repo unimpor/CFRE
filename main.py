@@ -60,7 +60,7 @@ def inference(cfre, test_loader, log_dir, ):
 def train(num_epochs, patience, cfre, train_loader, val_loader, optimizer, log_dir, warmup=True, **kwargs):
     start = kwargs.get("start", 0)
     # best_val_signal = -1
-    best_val_signal = {"recall": -1, "step": -1, "ranking": -1000}
+    best_val_signal = {"recall": -1, "step": -1, "ranking": -1000, "hard_len": -1000}
     loggings = opj(log_dir, "logging.txt")
     K = cfre.K
     for epoch in tqdm(range(start, num_epochs)):      
@@ -136,7 +136,6 @@ def main():
     parser.add_argument('--hpath', type=str, default=None)
     parser.add_argument('--inf_level', type=str, default="triplet")
     parser.add_argument('--comp', action='store_true', help='compliment version for test inference')
-    parser.add_argument('--retrieval', action='store_false', help='Use retrieval in inference.')
     parser.add_argument('--weight', type=float, default=2.0)
     parser.add_argument('--add_hard', action='store_true', help='Add hard samples.')
     parser.add_argument('--post_filter', action='store_true', help='Add hard samples.')
@@ -149,13 +148,10 @@ def main():
     config = yaml.safe_load(open(f"config/{args.dataset}_config.yaml", 'r'))
     config['algorithm']['coeff1'] = args.coeff1
     config['algorithm']['coeff2'] = args.coeff2
-    config['algorithm']['tau'] = args.tau
     config['algorithm']['ret_num'] = args.ret_num
-    config['algorithm']['algo'] = args.algo
-    config['algorithm']['gumbel_strength'] = args.gumbel_strength
-    config['llms']['frequency_penalty'] = args.penalty
-    config['llms']['gpu_memory_utilization'] = args.gpu_util
-    config['llms']['fast_thinking'] = args.fast_thinking
+    config['algorithm']['ret_train'] = args.ret_train
+    config['llms']["level"] = args.inf_level
+    config['retriever']['model_type'] = config['logging']['ret'] = args.retriever
 
     config['retriever']['output_size'] = args.output_size
     if args.llm_model_name_or_path:
@@ -184,7 +180,13 @@ def main():
     else:
         train_set = RetrievalDataset(config=config["dataset"], split='train', opath=args.opath, hpath=args.hpath)
         val_set = RetrievalDataset(config=config["dataset"], split='val', training=False)
+        
+        from torch.utils.data import random_split
+        print(f"Current PyTorch seed: {torch.initial_seed()}")
+        half_size = 800
+        train_set, _ = random_split(train_set, [half_size, len(train_set) - half_size])
         print(len(train_set))
+
         train_loader = DataLoader(train_set, batch_size=train_config['batch_size'], shuffle=True, collate_fn=collate_fn, drop_last=False)
         val_loader = DataLoader(val_set, batch_size=train_config['batch_size'], shuffle=False, collate_fn=collate_fn)
 
@@ -209,10 +211,11 @@ def main():
         end = time.time()
         print(len(to_preserve), (end-start)/60)
         # double check
-        # test_set = [dat for dat in test_set if dat["id"] in to_preserve]
-        # test_loader = DataLoader(test_set, batch_size=1, shuffle=False, collate_fn=collate_fn)
-        # cfre.llms.prompt_update()
-        # _ = inference(cfre, test_loader, log_dir)
+        if 'Llama' in args.llm_model_name_or_path:
+            test_set = [dat for dat in test_set if dat["id"] in to_preserve]
+            test_loader = DataLoader(test_set, batch_size=1, shuffle=False, collate_fn=collate_fn)
+            cfre.llms.prompt_update()
+            _ = inference(cfre, test_loader, log_dir)
         exit(0)
 
     # Set up Optimizer.

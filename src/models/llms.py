@@ -10,63 +10,56 @@ from functools import partial
 import torch.nn as nn
 from src.utils.prompts import *
 from src.utils import print_log, triplet_to_str
-
-API_KEY = "215e0f164f9f445ea2aaa64db2e1c135"
+# 215e0f164f9f445ea2aaa64db2e1c135
+API_KEY = "aca3450b38024f6786313b557f4b99dd"
+# "aca3450b38024f6786313b557f4b99dd"
 # API_KEY="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"
 MAX_RETRIES = 5
 
 class LLMs(nn.Module):
-    def __init__(self, config):
-        """
-        See https://github.com/Graph-COM/SubgraphRAG/blob/main/reason/llm_utils.py
-        """
+    def __init__(self, config, **kwargs):
         super().__init__()
         self.prompt_mode = config["prompt_mode"]
         self.model_name = config["llm_model_name_or_path"]
         self.data_name = config["data_name"]
         self.cot_mode = config["cot"]
-        self.fast_thinking = config["fast_thinking"]
+        self.inf_level = config['level']
+        self.async_version = kwargs.get("async_version", True)
         # prompt config
-        print(config["frequency_penalty"])
+        print(self.inf_level)
         self.cot_prompt = None
-        if not self.fast_thinking:
+        if self.inf_level == "path":
             self.system_prompt = SYS_PROMPT
-            self.icl_prompt = [
-                            (ICL_USER_PROMPT, ICL_ASS_PROMPT), 
-                            # (ICL_USER_PROMPT_2, ICL_ASS_PROMPT_2),
-                            # (ICL_USER_PROMPT_3, ICL_ASS_PROMPT_3)
-                            ]
-            # self.icl_prompt = []
-        # else:
-        #     self.system_prompt = SYS_PROMPT_brief
-        #     self.icl_prompt = [(ICL_USER_PROMPT, ICL_ASS_PROMPT_brief), 
-        #                     (ICL_USER_PROMPT_2, ICL_ASS_PROMPT_2_brief),
-        #                     (ICL_USER_PROMPT_3, ICL_ASS_PROMPT_3_brief)
-        #                     ]
-            # self.system_prompt = SYS_PROMPT_brief_path_level_inf
-            # self.icl_prompt = [(ICL_USER_PROMPT_path_level_inf, ICL_ASS_PROMPT_brief_path_level_inf)]
-        if self.model_name == "meta-llama/Meta-Llama-3.1-8B-Instruct":
-            client = LLM(model=self.model_name, 
-                         tensor_parallel_size=config["tensor_parallel_size"], 
-                         max_seq_len_to_capture=config["max_seq_len_to_capture"],
-                         gpu_memory_utilization=config["gpu_memory_utilization"],
-                         )
-            sampling_params = SamplingParams(temperature=config["temperature"], 
-                                            max_tokens=config["max_tokens"],
-                                            frequency_penalty=config["frequency_penalty"])
-            self.llm = partial(client.chat, sampling_params=sampling_params, use_tqdm=False)
-        else:
-            client = AsyncOpenAI(
-                base_url="https://api.aimlapi.com/v1/",
-                api_key=API_KEY,  
-            )
+            self.icl_prompt = [(ICL_USER_PROMPT, ICL_ASS_PROMPT)]
+        elif self.inf_level == "triplet":
+            self.system_prompt = SYS_PROMPT_triple
+            self.icl_prompt = [(ICL_USER_PROMPT_triple, ICL_ASS_PROMPT_triple)]     
+
+        # if self.model_name == "meta-llama/Meta-Llama-3.1-8B-Instruct":
+        #     client = LLM(model=self.model_name, 
+        #                  tensor_parallel_size=config["tensor_parallel_size"], 
+        #                  max_seq_len_to_capture=config["max_seq_len_to_capture"],
+        #                  gpu_memory_utilization=config["gpu_memory_utilization"],
+        #                  )
+        #     sampling_params = SamplingParams(temperature=config["temperature"], 
+        #                                     max_tokens=config["max_tokens"],
+        #                                     frequency_penalty=config["frequency_penalty"])
+        #     self.llm = partial(client.chat, sampling_params=sampling_params, use_tqdm=False)
+        
+        client_class = AsyncOpenAI if self.async_version else OpenAI
+        
+        client = client_class(
+            base_url="https://api.aimlapi.com/v1/",
+            api_key=API_KEY,
+        )
+        if self.async_version:
             self.semaphore = asyncio.Semaphore(20)
-            print(config['seed'], config['temperature'])
-            self.llm = partial(client.chat.completions.create, 
-                               model=self.model_name, 
-                               seed=config["seed"], 
-                               temperature=config["temperature"], 
-                               max_tokens=1000)
+        print(config['seed'], config['temperature'])
+        self.llm = partial(client.chat.completions.create, 
+                            model=self.model_name, 
+                            seed=config["seed"], 
+                            temperature=config["temperature"], 
+                            max_tokens=1000)
     
     def initialize_prompt_template(self, ):
         if not self.fast_thinking:
@@ -138,32 +131,32 @@ class LLMs(nn.Module):
         return conversation
 
     def llm_inf(self, messages):
-        if self.model_name == "meta-llama/Meta-Llama-3.1-8B-Instruct":
-            outputs = self.llm(messages=messages)
-            # non-batch version
-            return outputs[0].outputs[0].text
+        # if self.model_name == "meta-llama/Meta-Llama-3.1-8B-Instruct":
+        #     outputs = self.llm(messages=messages)
+        #     # non-batch version
+        #     return outputs[0].outputs[0].text
             # batch version
             # return [output.outputs[0].text for output in outputs]
-        else:
+        # else:
             # inference with retry
-            retries, max_retries = 0, MAX_RETRIES
-            while retries < max_retries:
-                try:
-                    output = self.llm(messages=messages)
-                    return output.choices[0].message.content
-                except openai.BadRequestError as e:
-                    print(e)
-                    break
-                except openai.RateLimitError as e:
-                    wait_time = (2 ** retries) * 5  # Exponential backoff
-                    print(f"Rate limit error encountered. Retrying in {wait_time} seconds...")
-                    time.sleep(wait_time)
-                    retries += 1
-                except:
-                    break
-            # raise Exception("Max retries exceeded. Please check your rate limits or try again later.")
-            print("Max retries exceeded. Please check your rate limits or try again later.")
-            return "ans: Not available"
+        retries, max_retries = 0, MAX_RETRIES
+        while retries < max_retries:
+            try:
+                output = self.llm(messages=messages)
+                return output.choices[0].message.content
+            except openai.BadRequestError as e:
+                print(e)
+                break
+            except openai.RateLimitError as e:
+                wait_time = (2 ** retries) * 5  # Exponential backoff
+                print(f"Rate limit error encountered. Retrying in {wait_time} seconds...")
+                time.sleep(wait_time)
+                retries += 1
+            except:
+                break
+        # raise Exception("Max retries exceeded. Please check your rate limits or try again later.")
+        print("Max retries exceeded. Please check your rate limits or try again later.")
+        return "ans: Not available"
 
     def forward(self, query_batch, hint_batch, triplet_or_path_batch):
         
@@ -205,16 +198,13 @@ class LLMs(nn.Module):
 
 
 class LLMs_Ret_Paths(LLMs):
-    def __init__(self, config):
-        super().__init__(config)
+    def __init__(self, config, **kwargs):
+        super().__init__(config, **kwargs)
         self.system_prompt = SYS_PROMPT_PATH
-        self.icl_prompt = []
-        if self.model_name == "meta-llama/Meta-Llama-3.1-8B-Instruct":
-            self.icl_prompt = [(ICL_USER_PROMPT_PATH_0, ICL_ASS_PROMPT_PATH_0),
-                               (ICL_USER_PROMPT_PATH_1, ICL_ASS_PROMPT_PATH_1),
-                               (ICL_USER_PROMPT_PATH_2, ICL_ASS_PROMPT_PATH_2),
-                               (ICL_USER_PROMPT_PATH_3, ICL_ASS_PROMPT_PATH_3),
-                               ]
+        self.icl_prompt = [
+                            # (ICL_USER_PROMPT_PATH_0, ICL_ASS_PROMPT_PATH_0),
+                            (ICL_USER_PROMPT_PATH, ICL_ASS_PROMPT_PATH),
+                            ]
 
         self.level = "path"
     
@@ -243,30 +233,27 @@ class LLMs_Ret_Paths(LLMs):
             user_query = "\n\n".join([triplet_or_path_prompt, question_prompt, answer_prompt])
             messages_batch.append(self.pack_prompt(user_query))
         
-        if self.model_name == "meta-llama/Meta-Llama-3.1-8B-Instruct":
-            response_batch = self.llm_inf(messages=messages_batch)
-        else:
-            response_batch = [self.llm_inf(messages=messages) for messages in messages_batch]
+        response_batch = [self.llm_inf(messages=messages) for messages in messages_batch]
 
-        for d, response, triplets_or_paths in zip(id_batch, response_batch, path_batch):
+        for d, response, triplets_or_paths, q in zip(id_batch, response_batch, path_batch, query_batch):
             print_log(d, logging)
+            print_log(q, logging)
             print_log(response, logging)
             print_log('\n', logging)
-            score_list = get_score(response, len(triplets_or_paths))
+            # score_list = get_score(response, len(triplets_or_paths))
             # print(score_list)
-            scores_batch.append(score_list)
-        #     identified, sign = get_pred(response), get_sign(response)
-        #     try:
-        #         identified = [triplets_or_paths[i] for i in identified]
-        #     except IndexError as e:
-        #         identified = []
-        #     identified_batch.append(identified)
-        #     sign_batch.append(sign)
-        return scores_batch
-        # return identified_batch, sign_batch
-        # selected_triplets = [triplet for path in identified for triplet in path]
-        # selected_triplets = [all_triplets.index(triplet) for triplet in selected_triplets]
-        # return selected_triplets
+            # scores_batch.append(score_list)
+            # identified, sign = get_pred(response), get_sign(response)
+            identified = get_pred(response)
+            try:
+                identified = [triplets_or_paths[i] for i in identified]
+            except IndexError as e:
+                identified = []
+            identified_batch.append(identified)
+            # sign_batch.append(sign)
+        # return scores_batch
+        return identified_batch
+
 
         
 class LLMs_Ret_Triplets(LLMs):

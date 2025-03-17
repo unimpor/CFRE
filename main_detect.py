@@ -49,11 +49,7 @@ def main():
     config = yaml.safe_load(open(f"config/{args.dataset}_config.yaml", 'r'))
     config['algorithm']['coeff1'] = args.coeff1
     config['algorithm']['coeff2'] = args.coeff2
-    config['algorithm']['tau'] = args.tau
     config['algorithm']['ret_num'] = args.ret_num
-    config['algorithm']['algo'] = args.algo
-    config['algorithm']['gumbel_strength'] = args.gumbel_strength
-    config['llms']['frequency_penalty'] = args.penalty
     if args.llm_model_name_or_path:
         config['llms']["llm_model_name_or_path"] = config["logging"]["llm"] = args.llm_model_name_or_path
     train_config = config['train']
@@ -81,12 +77,12 @@ def main():
     # }
     # llms = llms_series[args.version](llm_config)
     # print(args.version, args.ckpt_path)
-    llms = LLMs_Ret_Paths(llm_config)
+    llms = LLMs_Ret_Paths(llm_config, async_version=False)
     
     train_set = RetrievalDatasetWithoutEmb(config=config["dataset"], split='train', )
     print(len(train_set))
     # train_set = [train_set[i] for i in range(int(len(train_set)/2), len(train_set))]
-    train_loader = DataLoader(train_set, batch_size=8, shuffle=False, collate_fn=collate_fn, drop_last=False)
+    train_loader = DataLoader(train_set, batch_size=4, shuffle=False, collate_fn=collate_fn, drop_last=False)
 
     ibtn = Retriever(config['retriever']).to(device)
     if args.ckpt_path:
