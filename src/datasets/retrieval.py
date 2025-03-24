@@ -39,35 +39,25 @@ class RetrievalDataset:
         return opj(self.root, self.data_name, "processed", filename)
 
     def process(self, raw_data, ):
-        num = 0
+        
         embs = self._load_emb()
         if self.training:
-            shortest_paths_cache = torch.load("datasets/cwq/processed/shortest_path.pth")
+            shortest_paths_cache = torch.load(f"datasets/{self.data_name}/processed/shortest_path.pth")
             oracle_paths_cache = torch.load(self.oracle_path)
-            if self.hard_path:
-                hard_paths_cache = torch.load(self.hard_path)
-        # only for the need of test
+
         processed_data, filtering_ids = [], []
-        if self.split == "test" and self.post_filter:
-            filtering_ids = torch.load(f"datasets/{self.data_name}/processed/test_filtering_bad_ids.pth")
+        
         for sample in raw_data:
             sample_id = sample['id']
             sample_embd = embs.get(sample_id, None)
             if not sample_embd or sample_id in filtering_ids:
                 continue
-            # shortest path: [path0, path1, ...]
-            # dat: [0, -1, 1]
-            dat =  oracle_paths_cache.get(sample_id, []) if self.training else []
-            if self.training and not dat:
-                continue
+
+            oracle_paths =  oracle_paths_cache.get(sample_id, []) if self.training else []
             shortest_paths = shortest_paths_cache[sample_id] if self.training else []
-            # assert len(shortest_paths) == len(dat)
-            # oracle_paths = []
-            # if self.training:
-            #     # target = 1 if 1 in dat else 0
-            #     # oracle_paths = [path for (path, s) in zip(shortest_paths, dat) if s == target]
-            #     oracle_paths = [path for (path, s) in zip(shortest_paths, dat) if s in [0,1]]
-            oracle_paths = dat
+            if self.training and not oracle_paths:
+                continue
+            
             hard_negatives_paths, hard_positive_paths = [], []
 
             all_entities = sample["text_entity_list"] + sample["non_text_entity_list"]
@@ -86,42 +76,14 @@ class RetrievalDataset:
             edge_index = torch.stack([torch.tensor(h_id_list), 
                                       torch.tensor(t_id_list)], axis=0)
             edge_attr = sample_embd['relation_embs'][r_id_list]
-            
-            if self.training and self.hard_path:
-                hard_negatives = get_hard_answers(all_entities, hard_paths_cache[sample_id]['not_prec'])
-                # assert hard neg not intersected with ans
-                hard_negatives = [i for i in hard_negatives if i not in sample["a_entity"]]
-                # assert len(set(hard_negatives) & set(sample["a_entity"])) == 0
-                # hard_negatives_paths = get_paths(all_triplets, sample["q_entity"], hard_negatives)
-                # hard_positive_paths = get_pos_paths(oracle_paths, hard_paths_cache[sample_id]['missing'])
-                hard_negatives_paths = []
-                for path in hard_paths_cache[sample_id]['select_paths']:
-                    path_entities = [i for t in path for i in t]
-                    if set(path_entities) & set(hard_negatives):
-                        hard_negatives_paths.append(path)
 
             def path2tid(all_t, all_p):
                 return remove_duplicates([all_t.index(item) for path in all_p for item in path])
             
             shortest_path_idx = path2tid(all_triplets, shortest_paths)
             oracle_path_idx = path2tid(all_triplets, oracle_paths)
-            hard_neg_path_idx_ = path2tid(all_triplets, hard_negatives_paths)
-            hard_neg_path_idx = [i for i in hard_neg_path_idx_ if i not in oracle_path_idx]
-            # if len(set(oracle_path_idx) & set(hard_neg_path_idx)) > 0:
-            #     print(len(set(oracle_path_idx) & set(hard_neg_path_idx)))
-            #     num += 1
-            hard_pos_path_idx = path2tid(all_triplets, hard_positive_paths)
-
-            # shortest_path_idx = [all_triplets.index(item) for path in shortest_paths for item in path]
-            # shortest_path_idx = remove_duplicates(shortest_path_idx)
-
-            # map {-1, 0, 1} in shortest path to {1, 2, 3} 
-            scores = -torch.ones(len(all_triplets))
-            # for path, score in zip(shortest_paths, dat):
-            #     for t in path:
-            #         scores[all_triplets.index(t)] = max(score, -1)
-            # scores = (scores + 1).long()
-
+            if self.training and len(oracle_path_idx) == 0:
+                continue
 
             processed_sample = {
                 "id": sample_id,
@@ -133,13 +95,11 @@ class RetrievalDataset:
                 "relevant_idx": oracle_path_idx,
                 "relevant_idx_in_path": [[all_triplets.index(item) for item in path] for path in oracle_paths],
                 "shortest_path_idx": shortest_path_idx,
-                "hard_idx": hard_neg_path_idx + hard_pos_path_idx,
-                "y": sample["a_entity"],
-                "graph": Data(x=x, scores=scores, edge_attr=edge_attr, edge_index=edge_index.long(), topic_signal=topic_entity_one_hot.float())
+                "y": sample.get("a_entity", []),
+                "graph": Data(x=x, edge_attr=edge_attr, edge_index=edge_index.long(), topic_signal=topic_entity_one_hot.float())
             }
             processed_data.append(processed_sample)
-        # print(num)
-        # input("suncc")
+
         return processed_data
 
     def _load_data(self, file_path):

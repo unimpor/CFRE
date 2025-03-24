@@ -22,6 +22,7 @@ class RLRE(nn.Module):
         super().__init__()
         self.retriever = retriever
         self.llms = llm_model
+        self.dataset = self.llms.data_name
         self.coeff1 = float(config['coeff1'])
         self.coeff2 = float(config['coeff2'])
         self.metrics_name = config["reward_metrics"]
@@ -275,7 +276,7 @@ class RLRE(nn.Module):
         #     positive_indices = sorted_indices[:K]
         return None, positive_indices.tolist()
 
-    def reorganize(self, all_triplets, q_entities, select_idx, logits, training_mode=False):
+    def reorganize(self, all_triplets, q_entities, select_idx, logits, training_mode=False, max_len=2):
         if len(all_triplets) < 5:
             return [str(all_triplets[i]).replace("'", "") for i in select_idx], [[all_triplets[i]] for i in select_idx]
         
@@ -289,9 +290,6 @@ class RLRE(nn.Module):
 
         for (i,j) in combinations(select_idx, 2):
             ti, tj = all_triplets[i], all_triplets[j]
-            # remove self-loop
-            # if ti[0] == tj[-1] and ti[-1] == tj[0] and (ti[0] in q_entities or ti[-1] in q_entities):
-            #     to_del = i if ti[-1] in q_entities else j
             # remove abundant relations for the same entity pair
             if ti[0] == tj[0] and ti[-1] == tj[-1]:
                 si, sj = logits[i].item(), logits[j].item()
@@ -319,7 +317,8 @@ class RLRE(nn.Module):
             if seg not in detected_paths and extract_(seg)[1][:2] not in ['m.', 'g.']:
                 visited.extend(seg)
                 detected_paths.append(seg)
-
+            if len(seg) == max_len:
+                continue
             for b in non_topics:
                 motif = to_match(seg, b)
                 if motif and (motif[0][0], motif[-1][-1]) not in detected_pairs:
@@ -338,9 +337,6 @@ class RLRE(nn.Module):
         for p in detected_paths:
             p_ = list(chain.from_iterable(p))
             logics, target = (p_[:-1], {p_[-1]}) if p_[0] in q_entities else (p_[1:], {p_[0]})
-            for i in range(1, len(logics) - 1):
-                if logics[i].startswith(('m.', 'g.')):
-                    logics[i] = 'm.xxxxxx'
             logic2path[tuple(logics)].update(target)
 
         detected_paths = []
