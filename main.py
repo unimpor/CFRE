@@ -106,7 +106,6 @@ def train(num_epochs, patience, cfre, train_loader, val_loader, optimizer, log_d
         
         if epoch - best_epoch >= patience:
             write_log(f'Early stop at epoch {epoch}', loggings)
-            save_checkpoint(cfre.retriever, epoch, log_dir, filename=f"final.pth")
             break
 
 def main():
@@ -122,11 +121,9 @@ def main():
     parser.add_argument('--version', type=str, default="path")
     parser.add_argument('--coeff1', type=float, default=0.1)
     parser.add_argument('--coeff2', type=float, default=0.1)
-    parser.add_argument('--gpu_util', type=float, default=0.95)
-    parser.add_argument('--tau', type=float, default=1)
-    parser.add_argument('--penalty', type=float, default=0.16)
     parser.add_argument('--ret_num', type=int, default=100)
     parser.add_argument('--ret_train', type=int, default=100)
+    parser.add_argument('--fewshot', type=int, default=None)
     parser.add_argument('--output_size', type=int, default=1)
     parser.add_argument('--start', type=int, default=0, help="start of the training epoch.")
     parser.add_argument('--algo', type=str, default="v2")
@@ -181,11 +178,10 @@ def main():
         train_set = RetrievalDataset(config=config["dataset"], split='train', opath=args.opath, hpath=args.hpath)
         val_set = RetrievalDataset(config=config["dataset"], split='val', training=False)
         
-        from torch.utils.data import random_split
-        print(f"Current PyTorch seed: {torch.initial_seed()}")
-        half_size = 800
-        train_set, _ = random_split(train_set, [half_size, len(train_set) - half_size])
-        print(len(train_set))
+        if args.fewshot:
+            from torch.utils.data import random_split
+            train_set, _ = random_split(train_set, [args.fewshot, len(train_set) - args.fewshot])
+            print(len(train_set))
 
         train_loader = DataLoader(train_set, batch_size=train_config['batch_size'], shuffle=True, collate_fn=collate_fn, drop_last=False)
         val_loader = DataLoader(val_set, batch_size=train_config['batch_size'], shuffle=False, collate_fn=collate_fn)
