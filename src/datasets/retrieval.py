@@ -14,6 +14,13 @@ import time
 
 NOISES = ["Country", "College/University", "Male", "Continent"]
 
+TO_FILTER_REL = {
+            "common.topic.description",
+            "kg.object_profile.prominent_type",
+            "en",
+            "common.topic.alias"
+        }
+
 class RetrievalDataset:
     """
     load retrieval results and post-processing
@@ -284,38 +291,135 @@ class RetrievalDatasetWithoutEmb(RetrievalDataset):
     def __init__(self, config, split):
         super().__init__(config, split)
 
+    def prepare_shortest(self, ):
+        """
+        Build KG and find shortest paths from q to a.
+        """
+        pass
+
+    def refine_shortest(self, sample, shortest_paths, all_triplets):
+
+        """
+        Refine shortest paths build from `prepare_shortest` and to feed to LLMs
+        """
+
+        sample_type, q_entities, a_entities = sample['function'], sample['q_entity'], sample["a_entity"]
+        ans = a_entities[0]  # fetch only one representative answer
+
+        if len(a_entities) > 1:
+            shortest_paths = [p for p in shortest_paths if ans in path2set(p)]
+
+        # fetech one representative logics, filter repeats
+        reserved_logics, new_shortest_paths = set(), []
+
+        for p in shortest_paths:
+            logic_p = (p[0][0], ) + tuple(triple[1] for triple in p) + (p[-1][-1], )
+            if logic_p not in reserved_logics:
+                reserved_logics.add(logic_p)
+                new_shortest_paths.append(p)
+        
+        shortest_paths = new_shortest_paths
+
+        # process special question type
+        # 'count' with #q-entities > 1 would be processed without LLMs
+        # TODO: integrate 'count' with #q-entities > 1 into training?
+        if sample_type == 'count' and len(q_entities) == 1:
+            shortest_paths, _ = self.get_centric_grpah(all_triplets, q_entities[0])
+            # shortest_paths, all_candidates = [], {}
+            # reserved_set = set(sample["text_entity_list"])
+            
+            # for q in q_entities:
+            #     candidates, extracted_entities = self.get_centric_grpah(all_triplets, q)
+            #     all_candidates[q] = candidates
+            #     reserved_set = reserved_set & extracted_entities
+            # for _,v in all_candidates.items():
+            #     shortest_paths += [itm for itm in v if reserved_set & path2set(itm)]     
+        
+        if sample_type not in ['none', 'count']:
+            seed_set = set()
+            for p in shortest_paths:
+                seed_set |= set(get_entities_from_path(p))
+            seed_set -= set(q_entities)
+            
+            for q in seed_set:
+                candidates, _ = self.get_centric_grpah(all_triplets, q)
+                shortest_paths += candidates
+        
+        final_paths = []
+        # final processing of paths: remvoe duplicate, filter meaningless relations
+        for p in shortest_paths:
+            if p in final_paths:
+                continue
+            if {t[1] for t in p} & TO_FILTER_REL:
+                continue
+            final_paths.append(p)
+
+        return final_paths
+        
+    @staticmethod
+    def get_centric_grpah(all_triplets, q):
+        # We do not consider CVT nodes for simplicity
+        # TODO: CVT nodes?
+        # forward first.
+        selections_forward, selections_backward, extracted_targets, reserved_relations = [], [], set(), set()
+        for triple in all_triplets:
+            if triple[0] == q and not triple[-1].startswith(('m.', 'g.')):
+                selections_forward.append(triple)
+            if triple[-1] == q and not triple[0].startswith(('m.', 'g.')):
+                selections_backward.append(triple)
+        
+        selections = []
+
+        for triple in selections_forward:
+            if triple[1] not in reserved_relations and triple[-1] not in extracted_targets:
+                selections.append([triple])
+                extracted_targets.add(triple[-1])
+                reserved_relations.add(triple[1])
+        for triple in selections_backward:
+            if triple[1] not in reserved_relations and triple[0] not in extracted_targets:
+                selections.append([triple])
+                extracted_targets.add(triple[0])
+                reserved_relations.add(triple[1])
+
+        return selections, extracted_targets
+
     def process(self, raw_data):
         print("begin")
         processed_data = []
-        shortest_paths_cache = torch.load(f"datasets/{self.data_name}/processed/shortest_path.pth")
+        shortest_paths_cache = torch.load(f"datasets/{self.data_name}/processed/refined_path.pth")
+        # shortest_paths_cache_new = {}
         for sample in raw_data:
-            sample_id = sample['id']
-            # if sample_id not in ["WebQTest-2008_8c6b952c6bd963f0ece4e401c9eb731a", 
-            #                      "WebQTrn-2518_1ef15e22372df70baf01b72850deb14d", 
-            #                      "WebQTest-415_b6ad66a3f1f515d0688c346e16d202e6",
-            #                      "WebQTest-341_0f5ccea2d11b712eda64ebf2f6aeb1ee"]:
-            #     continue
-            shortest_paths = shortest_paths_cache.get(sample_id, [])
 
             all_entities = sample["text_entity_list"] + sample["non_text_entity_list"]
             all_relations = sample["relation_list"]
             h_id_list, r_id_list, t_id_list = sample["h_id_list"], sample["r_id_list"], sample["t_id_list"]
             all_triplets = [(all_entities[h], all_relations[r], all_entities[t]) for (h, r, t) in zip(h_id_list, r_id_list, t_id_list)]
-
+            
+            # if sample_id not in ["WebQTest-2008_8c6b952c6bd963f0ece4e401c9eb731a", 
+            #                      "WebQTrn-2518_1ef15e22372df70baf01b72850deb14d", 
+            #                      "WebQTest-415_b6ad66a3f1f515d0688c346e16d202e6",
+            #                      "WebQTest-341_0f5ccea2d11b712eda64ebf2f6aeb1ee"]:
+            #     continue
+            shortest_paths = shortest_paths_cache.get(sample['id'], [])
+            # shortest_paths = self.refine_shortest(sample, shortest_paths, all_triplets)
+            # shortest_paths_cache_new[sample['id']] = shortest_paths
             processed_sample = {
-                "id": sample_id,
+                "id": sample['id'],
                 "q": sample["question"],
-                "y": sample["a_entity"],
+                "y": [sample["a_entity"][0]],  # only one answer is enough
                 "triplets": all_triplets,
                 "relevant_paths": shortest_paths,
             }
-            if not shortest_paths or max(len(path) for path in shortest_paths) == 0:
+            if len(shortest_paths) <= 1 or max(len(path) for path in shortest_paths) == 0:
                 continue
             processed_data.append(processed_sample)
         # torch.save(scored_data, opj(self.root, self.data_name, "processed", f"{self.data_name}_242028_{self.split}_path1.pth"))
-        # torch.save(shortest_paths_cache, opj(self.root, self.data_name, "processed", f"shortest_path.pth"))
+        # torch.save(shortest_paths_cache_new, opj(self.root, self.data_name, "processed", f"refined_path.pth"))
         # input("success")
         return split_samples(processed_data)
+
+def path2set(path):
+    return {itm for triple in path for itm in triple}
 
 
 def split_samples(processed_samples):
@@ -340,6 +444,8 @@ def split_samples(processed_samples):
     
     return new_samples
 
+def get_entities_from_path(path):
+    return [triple[0] for triple in path] + [path[-1][-1]]
 
 def get_hard_answers(all_entities, ans_list):
     ans_list_ = []
