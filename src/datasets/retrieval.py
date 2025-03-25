@@ -62,7 +62,7 @@ class RetrievalDataset:
 
             oracle_paths =  oracle_paths_cache.get(sample_id, []) if self.training else []
             shortest_paths = shortest_paths_cache[sample_id] if self.training else []
-            if self.training and not oracle_paths:
+            if self.training and (len(oracle_paths) <= 1 or max(len(path) for path in oracle_paths) == 0 or sample["a_entity"] == ['null']):
                 continue
             
             all_entities = sample["text_entity_list"] + sample["non_text_entity_list"]
@@ -390,6 +390,7 @@ class RetrievalDatasetWithoutEmb(RetrievalDataset):
         # shortest_paths_cache_new = {}
         for sample in raw_data:
 
+            ans = sample["a_entity"][0] if sample['function'] != 'count' else '1'
             all_entities = sample["text_entity_list"] + sample["non_text_entity_list"]
             all_relations = sample["relation_list"]
             h_id_list, r_id_list, t_id_list = sample["h_id_list"], sample["r_id_list"], sample["t_id_list"]
@@ -406,17 +407,17 @@ class RetrievalDatasetWithoutEmb(RetrievalDataset):
             processed_sample = {
                 "id": sample['id'],
                 "q": sample["question"],
-                "y": [sample["a_entity"][0]],  # only one answer is enough
+                "y": [ans],  # only one answer is enough
                 "triplets": all_triplets,
                 "relevant_paths": shortest_paths,
             }
-            if len(shortest_paths) <= 1 or max(len(path) for path in shortest_paths) == 0:
+            if len(shortest_paths) <= 1 or max(len(path) for path in shortest_paths) == 0 or sample["a_entity"] == ['null']:
                 continue
             processed_data.append(processed_sample)
         # torch.save(scored_data, opj(self.root, self.data_name, "processed", f"{self.data_name}_242028_{self.split}_path1.pth"))
         # torch.save(shortest_paths_cache_new, opj(self.root, self.data_name, "processed", f"refined_path.pth"))
         # input("success")
-        return split_samples(processed_data)
+        return processed_data
 
 def path2set(path):
     return {itm for triple in path for itm in triple}

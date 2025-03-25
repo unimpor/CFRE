@@ -82,7 +82,7 @@ def main():
     train_set = RetrievalDatasetWithoutEmb(config=config["dataset"], split='train', )
     print(len(train_set))
     # train_set = [train_set[i] for i in range(int(len(train_set)/2), len(train_set))]
-    train_loader = DataLoader(train_set, batch_size=4, shuffle=False, collate_fn=collate_fn, drop_last=False)
+    train_loader = DataLoader(train_set, batch_size=1, shuffle=False, collate_fn=collate_fn, drop_last=False)
 
     ibtn = Retriever(config['retriever']).to(device)
     if args.ckpt_path:
