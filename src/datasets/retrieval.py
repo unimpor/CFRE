@@ -34,14 +34,13 @@ class RetrievalDataset:
         self.processed_data = self.process(raw_data, )
 
     def process(self, raw_data, ):
-        
-        assert os.path.exists(self.short_path), "Shortest path not exists."
-        assert os.path.exists(self.oracle_path), "LLM-refined path not exists."
 
         embs = self._load_emb()
         if self.training:
-            shortest_paths_cache = self._load_data()
-            oracle_paths_cache = self._load_data()
+            assert os.path.exists(self.short_path), "Shortest path not exists."
+            assert os.path.exists(self.oracle_path), "LLM-refined path not exists."
+            shortest_paths_cache = self._load_data(self.short_path)
+            oracle_paths_cache = self._load_data(self.oracle_path)
 
         processed_data = []
         
@@ -203,19 +202,22 @@ class RetrievalDatasetWithoutEmb(RetrievalDataset):
         """
 
         sample_type, q_entities, a_entities = sample['function'], sample['q_entity'], sample["a_entity"]
+        seed_set = set()
         ans = a_entities[0]  # fetch only one representative answer
         
         # only focus on one answer to release LLM refinement burden
         if len(a_entities) > 1:
             shortest_paths = [p for p in shortest_paths if ans in path2set(p)]
-
+        
+        shortest_paths = remove_dup_directions(shortest_paths, q_entities)
+        shortest_paths = remove_dup_logics(shortest_paths)
+        
         # process special question type: count
         if sample_type == 'count':
             shortest_paths = self.get_centric_grpah(all_triplets, q_entities[0])
-                    
+        
         # process special question type: argmax / argmin / > / <
         if sample_type not in ['none', 'count']:
-            seed_set = set()
             for p in shortest_paths:
                 seed_set |= set(get_entities_from_path(p))
             seed_set -= set(q_entities)
@@ -223,7 +225,7 @@ class RetrievalDatasetWithoutEmb(RetrievalDataset):
             for q in seed_set:
                 shortest_paths += self.get_centric_grpah(all_triplets, q)
 
-        shortest_paths = remove_dup_directions(shortest_paths, q_entities)
+        shortest_paths = remove_dup_directions(shortest_paths, q_entities+list(seed_set))
         shortest_paths = remove_dup_logics(shortest_paths)
         shortest_paths = remove_dup_path(shortest_paths)
 
@@ -232,12 +234,14 @@ class RetrievalDatasetWithoutEmb(RetrievalDataset):
     @staticmethod
     def get_centric_grpah(all_triplets, q):
         # We do not consider CVT nodes for simplicity
-        selections = []
+        selections, reserved_relations = [], set()
         for triple in all_triplets:
-            if triple[0] == q and not triple[-1].startswith(('m.', 'g.')):
+            if triple[0] == q and not triple[-1].startswith(('m.', 'g.')) and triple[1] not in reserved_relations:
                 selections.append([triple])
-            if triple[-1] == q and not triple[0].startswith(('m.', 'g.')):
+                reserved_relations.add(triple[1])
+            if triple[-1] == q and not triple[0].startswith(('m.', 'g.')) and triple[1] not in reserved_relations:
                 selections.append([triple])
+                reserved_relations.add(triple[1])
         return selections
 
     def process(self, raw_data):
@@ -276,9 +280,9 @@ class RetrievalDatasetWithoutEmb(RetrievalDataset):
             if len(shortest_paths) <= 1 or max(len(path) for path in shortest_paths) == 0 or sample["a_entity"] == ['null']:
                 continue
             processed_data.append(processed_sample)
-        # torch.save(scored_data, opj(self.root, self.data_name, "processed", f"{self.data_name}_242028_{self.split}_path1.pth"))
+        
         torch.save(shortest_paths_processed_cache, opj(self.root, self.data_name, "processed", f"intermediate.pth"))
-        input("success")
+        # input("success")
         return processed_data
     
     @staticmethod
@@ -323,11 +327,12 @@ def remove_dup_logics(shortest_paths):
 
 
 def remove_dup_path(shortest_paths):
-    final_paths = []
+    reserved, final_paths = [], []
     # final processing of paths: remvoe duplicate
     for p in shortest_paths:
-        if p in final_paths:
+        if len(p) == 1 and p[0] in reserved:
             continue
+        reserved.extend(p)
         final_paths.append(p)
     return final_paths
 
