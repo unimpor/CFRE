@@ -166,12 +166,12 @@ class RLRE(nn.Module):
 
         attn_logits_batch = self.retriever(graph_batch, q_embd_batch)
         select_idx = self.sampling_v3(attn_logits_batch, K=self.K)
-        select_triplets, select_paths = [str(all_triplets[i]).replace("'", "") for i in select_idx], None
 
-        if self.reorder:
-            select_triplets_, select_paths = self.reorganize(all_triplets, q_entities, select_idx, attn_logits_batch)
-            if len(select_triplets_) > 0:
-                select_triplets = select_triplets_
+        select_triplets, select_paths = [str(all_triplets[i]).replace("'", "") for i in select_idx], [[all_triplets[i]] for i in select_idx]
+        
+        if self.reorder and len(select_idx) > 5:
+            select_triplets, select_paths = self.reorganize(all_triplets, q_entities, select_idx, attn_logits_batch)
+
         # select_triplets = [triplet_to_str(all_triplets[i]) for i in select_idx]
         
         self.evaluation[dat_id] = {"select": select_idx, 
@@ -269,8 +269,6 @@ class RLRE(nn.Module):
         return None, positive_indices.tolist()
 
     def reorganize(self, all_triplets, q_entities, select_idx, logits, training_mode=False, max_len=2):
-        if len(all_triplets) < 5:
-            return [str(all_triplets[i]).replace("'", "") for i in select_idx], [[all_triplets[i]] for i in select_idx]
         
         def to_match(topic, n_topic):
             s, t, motif = (topic[-1][-1], n_topic[0][0], topic+n_topic) if topic[0][0] in q_entities else (n_topic[-1][-1], topic[0][0], n_topic+topic)
@@ -367,14 +365,7 @@ class RLRE(nn.Module):
         detected_triplets = [item for path in detected_paths for item in path]
         detected_triplets = post_processing(detected_triplets)
         detected_triplets = [str(item).replace("'", "") for item in detected_triplets]
-        # if len(q_entities) == 1:
-        #     # add scattered, refine scattere abstract ifentifiers
-        #     scattered_idx = [i for i in select_idx if (i not in detected_triplets) and (extract_(all_triplets[i])[1][:2] not in ['m.', 'g.'])]
-        #     scattered_idx = scattered_idx[:10]
-        #     # scattered_idx = [i for i in select_idx if i not in detected_triplets]
-        #     detected_paths = detected_paths + [[all_triplets[i]] for i in scattered_idx]
-        #     detected_triplets.extend([i for i in scattered_idx])
-        
+
         if not detected_paths:
             detected_paths = [[]]
 
