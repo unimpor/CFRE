@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import torch.nn as nn
 import torch.nn.functional as F
-from src.utils import RewardMetrics, gumbel_topk, print_log, triplet_to_str
+from src.utils import RewardMetrics, gumbel_topk, print_log, triplet_to_str, TO_FILTER_REL
 import copy
 from itertools import chain, combinations
 import random
@@ -191,16 +191,13 @@ class RLRE(nn.Module):
 
     @torch.no_grad()
     def oracle_detection(self, batch, logging):
-        graph_batch, answer_batch, triplet_batch, triplet_batch_idx, question_batch, q_embd_batch, id_batch, paths_batch = \
-            batch["graph"], batch["y"], batch["triplets"], batch['triplet_batch_idx'], batch["q"], batch["q_embd"], batch["id"], batch["relevant_paths"]
-
-        graph_batch, q_embd_batch = \
-            graph_batch.to(self.device), q_embd_batch.to(self.device)
+        answer_batch, question_batch, id_batch, paths_batch = batch["y"], batch["q"], batch["id"], batch["relevant_paths"]
         
         selected_batch = self.llms.oracle_detection(id_batch, question_batch, answer_batch, paths_batch, logging=logging)
 
         for d, s in zip(id_batch, selected_batch):
-            d = d.split("+")[0]
+            # grailqa NOTE type(d) is int.
+            # d = d.split("+")[0]
             if d in self.evaluation:
                 self.evaluation[d].extend(s)
             else:
@@ -210,7 +207,6 @@ class RLRE(nn.Module):
     def forward_pass(self, batch, epoch, training=True): 
         graph_batch, answer_batch, triplet_batch, triplet_batch_idx, relevant_idx_batch, question_batch, q_embd_batch, id_batch, shortest_path_idx_batch, hints_batch = \
             batch["graph"], batch["a_entity"], batch["triplets"], batch['triplet_batch_idx'], batch["relevant_idx"], batch["q"], batch["q_embd"], batch["id"], batch["shortest_path_idx"], batch["q_entity"]
-        hard_idx_batch, relevant_idx_in_path_batch = batch["hard_idx"], batch["relevant_idx_in_path"]
 
         graph_batch, q_embd_batch = \
             graph_batch.to(self.device), q_embd_batch.to(self.device)
@@ -222,17 +218,13 @@ class RLRE(nn.Module):
         for i, dat_id in enumerate(id_batch):
             attn_logit = attn_logits_batch[triplet_batch_idx == i]
             logits_batch.append(attn_logit)
-            select_idx = self.sampling_v3(attn_logit, K=self.Ktrain)
-            all_triplets, q_entities = triplet_batch[i], hints_batch[i]
-            # hard_idx, pos_idx = hard_idx_batch[i], relevant_idx_batch[i]
-            # hard_idx = [i for i in hard_idx if i in select_idx]
+            select_idx = self.sampling_v3(attn_logit, K=self.Ktrain if training else self.K)
+            all_triplets, q_entities, pos_idx, ans_list = triplet_batch[i], hints_batch[i], relevant_idx_batch[i], answer_batch[i]
+            
             hard_idx = []
-            if len(all_triplets) > 10 and self.add_hard:
-                hard_idx = self.reorganize(all_triplets, q_entities, select_idx, attn_logit, training_mode=True)
             hard_idx_batch_.append(hard_idx)
 
-            if not training:
-                all_triplets, ans_list = triplet_batch[i], answer_batch[i]
+            if not training and len(ans_list) > 0:
                 selected_triplets = [all_triplets[idx] for idx in select_idx]
                 selected_entities = [t[0] for t in selected_triplets] + [t[-1] for t in selected_triplets]
                 
@@ -283,7 +275,7 @@ class RLRE(nn.Module):
         def to_match(topic, n_topic):
             s, t, motif = (topic[-1][-1], n_topic[0][0], topic+n_topic) if topic[0][0] in q_entities else (n_topic[-1][-1], topic[0][0], n_topic+topic)
             return motif if s == t else None
-
+        
         def extract_(t):
             # extract topic and target
             return (t[0][0], t[-1][-1]) if (t[0][0] in q_entities) else (t[-1][-1], t[0][0])
@@ -301,6 +293,7 @@ class RLRE(nn.Module):
         with_topics, non_topics, detected_paths, logic2path, visited  = [], [], [], defaultdict(set), []
         for idx in select_idx:
             triple = all_triplets[idx]
+            # TODO: forward or backward
             if triple[0] in q_entities or triple[-1] in q_entities:
                 with_topics.append(triple)
             else:
@@ -310,7 +303,7 @@ class RLRE(nn.Module):
 
         non_topics, with_topics = [[itm] for itm in non_topics], [[itm] for itm in with_topics]
         with_topics_queue = deque(with_topics)
-
+        
         # multi-hop: BFS-based triplet expansion
         while with_topics_queue:
             seg = with_topics_queue.popleft()
@@ -325,14 +318,33 @@ class RLRE(nn.Module):
                     with_topics_queue.append(motif)
                     detected_pairs.append((motif[0][0], motif[-1][-1]))
                     detected_pairs.append((motif[-1][-1], motif[0][0]))
-        if training_mode:
-            return [idx for idx in select_idx if all_triplets[idx] not in visited]
+
         detected_paths = sorted(detected_paths, 
                                 key=lambda lst: score(lst, all_triplets, logits), 
                                 reverse=True)
-        # if self.llms.data_name == 'webqsp':
-        #     visited = [tp for p in detected_paths for tp in p]
-        #     detected_paths.extend([tp for tp in non_topics if tp[0] not in visited][:50])
+        if self.dataset in ['webqsp', 'grailqa']:
+            non_topics = [p[0] for p in non_topics if p[0] not in visited]
+            candidates = [t for t in all_triplets if set(t) & set(q_entities)]
+            for p in non_topics:
+                to_match = None
+                try:
+                    to_match = [i for i in candidates if i[-1] == p[0]][0]
+                    to_match = [to_match, p]
+                except:
+                    pass
+
+                try:
+                    to_match = [i for i in candidates if i[0] == p[-1]][0]
+                    to_match = [p, to_match]
+                except:
+                    pass
+                if to_match and to_match not in detected_paths and not check_abstract(to_match):
+                    detected_paths.append(to_match)
+        
+        if training_mode:
+            return [p for p in detected_paths if len(p) > 1]
+        
+        detected_paths = [post_process_(p) for p in detected_paths]
         # multi-answer
         for p in detected_paths:
             p_ = list(chain.from_iterable(p))
@@ -352,8 +364,9 @@ class RLRE(nn.Module):
         if self.llms.data_name == 'cwq':
             detected_paths = [i for i in detected_paths if len(i) > 1][:30] + [i for i in detected_paths if len(i) == 1]
 
-        detected_triplets = [str(item).replace("'", "") for path in detected_paths for item in path]
-
+        detected_triplets = [item for path in detected_paths for item in path]
+        detected_triplets = post_processing(detected_triplets)
+        detected_triplets = [str(item).replace("'", "") for item in detected_triplets]
         # if len(q_entities) == 1:
         #     # add scattered, refine scattere abstract ifentifiers
         #     scattered_idx = [i for i in select_idx if (i not in detected_triplets) and (extract_(all_triplets[i])[1][:2] not in ['m.', 'g.'])]
@@ -365,15 +378,34 @@ class RLRE(nn.Module):
         if not detected_paths:
             detected_paths = [[]]
 
-        # detected_triplets = remove_duplicates(detected_triplets)
+        detected_triplets = remove_duplicates(detected_triplets)
         return detected_triplets, detected_paths
+
+def post_processing(triples):
+
+    def chunk_set(s, size):
+        s = list(s)
+        return [set(s[i:i+size]) for i in range(0, len(s), size)]
+
+    expanded_triples = []
+    for h, rel, t in triples:
+        if isinstance(h, set):
+            for chunk in chunk_set(h, 5):
+                expanded_triples.append((chunk, rel, t))
+        elif isinstance(t, set):
+            for chunk in chunk_set(t, 5):
+                expanded_triples.append((h, rel, chunk))
+        else:
+            expanded_triples.append((h, rel, t))
+    return expanded_triples
+
 
 def score(lst, all_triplets, logits):
     logit_values = logits[[all_triplets.index(k) for k in lst]]
     return logit_values.mean().item()
 
-# def check_abstract(p):
-#     return p[0][0].startswith('m.') or p[0][0].startswith('g.') or p[-1][-1].startswith('m.') or p[-1][-1].startswith('g.')
+def check_abstract(p):
+    return p[0][0].startswith(('m.', 'g.')) or p[-1][-1].startswith(('m.', 'g.'))
 
 def remove_duplicates(input_list):
     seen = set()
@@ -384,22 +416,10 @@ def remove_duplicates(input_list):
             seen.add(item)
     return result
 
-def build_graphs(all_triplets):
-    G = nx.DiGraph()
-    for (a, b, c) in all_triplets:
-        G.add_node(a)
-        G.add_node(c)
-        G.add_edge(a, c, relation=b)
-    return G
-
-def gen_path(G, source, target):
-    shortest_paths = nx.all_shortest_paths(G, source=source, target=target)
-    all_triplets_in_path = []
-    for path in shortest_paths:
-        triplets_in_path = [(path[i], G[path[i]][path[i+1]]['relation'], path[i+1]) for i in range(len(path) - 1)]
-        all_triplets_in_path.append(triplets_in_path)
-    return all_triplets_in_path
-
+def post_process_(seg):
+    if len(seg) == 2 and seg[0][-1].startswith(('m.', 'g.')):
+        seg = [(seg[0][0], seg[1][1], seg[1][-1])]
+    return seg
 
 def merging_(lst_, q_entities):
     """
@@ -560,3 +580,44 @@ def get_avg_ranks(all_triples, sorted_indices, ans_list):
             #     if triplets_budget > self.budget:
             #         break
             # return detected_triplets[:self.budget], final_paths
+    
+                # if len(all_triplets) > 10 and self.add_hard:
+                # all_paths = self.reorganize(all_triplets, q_entities, select_idx, attn_logit, training_mode=True)
+                # for p in all_paths:
+                #     p_all_items = [e for tri in p for e in tri]
+                #     p_all_idx = [all_triplets.index(tri) for tri in p]
+                #     if not set(p_all_items) & set(ans_list) and not set(p_all_idx) & set(pos_idx):
+                #         hard_idx.extend(p_all_idx)
+
+
+
+                #             if self.training and self.hard_path:
+                # hard_negatives = get_hard_answers(all_entities, hard_paths_cache[sample_id]['not_prec'])
+                # # assert hard neg not intersected with ans
+                # hard_negatives = [i for i in hard_negatives if i not in sample["a_entity"]]
+                # # assert len(set(hard_negatives) & set(sample["a_entity"])) == 0
+                # # hard_negatives_paths = get_paths(all_triplets, sample["q_entity"], hard_negatives)
+                # # hard_positive_paths = get_pos_paths(oracle_paths, hard_paths_cache[sample_id]['missing'])
+                # hard_negatives_paths = []
+                # for path in hard_paths_cache[sample_id]['select_paths']:
+                #     path_entities = [i for t in path for i in t]
+                #     if set(path_entities) & set(hard_negatives):
+                #         hard_negatives_paths.append(path)
+
+
+            #     hard_neg_path_idx_ = path2tid(all_triplets, hard_negatives_paths)
+            # hard_neg_path_idx = [i for i in hard_neg_path_idx_ if i not in oracle_path_idx]
+            # # if len(set(oracle_path_idx) & set(hard_neg_path_idx)) > 0:
+            # #     print(len(set(oracle_path_idx) & set(hard_neg_path_idx)))
+            # #     num += 1
+            # hard_pos_path_idx = path2tid(all_triplets, hard_positive_paths)
+
+            # # shortest_path_idx = [all_triplets.index(item) for path in shortest_paths for item in path]
+            # # shortest_path_idx = remove_duplicates(shortest_path_idx)
+
+            # # map {-1, 0, 1} in shortest path to {1, 2, 3} 
+            # scores = -torch.ones(len(all_triplets))
+            # # for path, score in zip(shortest_paths, dat):
+            # #     for t in path:
+            # #         scores[all_triplets.index(t)] = max(score, -1)
+            # # scores = (scores + 1).long()
