@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import torch.nn as nn
 import torch.nn.functional as F
-from src.utils import RewardMetrics, gumbel_topk, print_log, triplet_to_str, TO_FILTER_REL
+from src.utils import RewardMetrics, get_chunk_set, gumbel_topk, print_log, triplet_to_str, TO_FILTER_REL
 import copy
 from itertools import chain, combinations
 import random
@@ -165,7 +165,7 @@ class RLRE(nn.Module):
             graph_batch.to(self.device), q_embd_batch.to(self.device)
 
         attn_logits_batch = self.retriever(graph_batch, q_embd_batch)
-        select_idx = self.sampling_v3(attn_logits_batch, K=self.K)
+        select_idx = self.sampling(attn_logits_batch, K=self.K)
 
         select_triplets, select_paths = [str(all_triplets[i]).replace("'", "") for i in select_idx], [[all_triplets[i]] for i in select_idx]
         
@@ -218,7 +218,7 @@ class RLRE(nn.Module):
         for i, dat_id in enumerate(id_batch):
             attn_logit = attn_logits_batch[triplet_batch_idx == i]
             logits_batch.append(attn_logit)
-            select_idx = self.sampling_v3(attn_logit, K=self.Ktrain if training else self.K)
+            select_idx = self.sampling(attn_logit, K=self.Ktrain if training else self.K)
             all_triplets, q_entities, pos_idx, ans_list = triplet_batch[i], hints_batch[i], relevant_idx_batch[i], answer_batch[i]
             
             hard_idx = []
@@ -244,7 +244,7 @@ class RLRE(nn.Module):
         loss, reward_loggings = self.cal_loss_with_weights(logits_batch, relevant_idx_batch, hard_idx_batch_)
         return loss, reward_loggings
 
-    def sampling_v3(self, tensor, training=False, K=6):
+    def sampling(self, tensor, training=False, K=6):
         sorted_indices = torch.argsort(tensor, descending=True)
         try:
             positive_indices = sorted_indices[:K]
@@ -253,20 +253,6 @@ class RLRE(nn.Module):
         select_idx = positive_indices.tolist()
 
         return select_idx if type(select_idx) is list else [select_idx]
-
-    def sampling_v2(self, tensor, training=False, K=6):
-        indices = torch.arange(len(tensor), device=tensor.device)
-    
-        positive_indices = indices[tensor > -3.5]
-        positive_values = tensor[tensor > -3.5]
-
-        # if len(positive_indices) > K:
-        sorted_indices = torch.argsort(positive_values, descending=True)
-        positive_indices = positive_indices[sorted_indices]
-        # else:
-        #     sorted_indices = torch.argsort(tensor, descending=True)
-        #     positive_indices = sorted_indices[:K]
-        return None, positive_indices.tolist()
 
     def reorganize(self, all_triplets, q_entities, select_idx, logits, training_mode=False, max_len=2):
         
@@ -288,61 +274,56 @@ class RLRE(nn.Module):
                 continue
             select_idx = [k for k in select_idx if k != to_del]
 
-        with_topics, non_topics, detected_paths, logic2path, visited  = [], [], [], defaultdict(set), []
+        with_topics, non_topics, detected_paths, logic2path, visited, detected_pairs  = [], [], [], defaultdict(set), [], set()
         for idx in select_idx:
             triple = all_triplets[idx]
-            # TODO: forward or backward
             if triple[0] in q_entities or triple[-1] in q_entities:
                 with_topics.append(triple)
             else:
                 non_topics.append(triple)
         
-        detected_pairs = [(t[0], t[-1]) for t in with_topics] + [(t[-1], t[0]) for t in with_topics]
-
         non_topics, with_topics = [[itm] for itm in non_topics], [[itm] for itm in with_topics]
         with_topics_queue = deque(with_topics)
+        # from src.datasets import remove_dup_directions
+        # # : remove abundant directions in topic
+        # detected_paths = remove_dup_directions(with_topics, q_entities)
         
         # multi-hop: BFS-based triplet expansion
+        # question-centric grouping
         while with_topics_queue:
             seg = with_topics_queue.popleft()
-            if seg not in detected_paths and extract_(seg)[1][:2] not in ['m.', 'g.']:
+            start, end = extract_(seg)
+            if seg not in detected_paths and not end.startswith(('m.', 'g.')):
                 visited.extend(seg)
                 detected_paths.append(seg)
             if len(seg) == max_len:
                 continue
             for b in non_topics:
                 motif = to_match(seg, b)
-                if motif and (motif[0][0], motif[-1][-1]) not in detected_pairs:
+                if motif and frozenset(extract_(motif)) not in detected_pairs:
                     with_topics_queue.append(motif)
-                    detected_pairs.append((motif[0][0], motif[-1][-1]))
-                    detected_pairs.append((motif[-1][-1], motif[0][0]))
+                    detected_pairs.add(frozenset(extract_(motif)))
 
         detected_paths = sorted(detected_paths, 
                                 key=lambda lst: score(lst, all_triplets, logits), 
                                 reverse=True)
-        if self.dataset in ['webqsp', 'grailqa']:
-            non_topics = [p[0] for p in non_topics if p[0] not in visited]
-            candidates = [t for t in all_triplets if set(t) & set(q_entities)]
-            for p in non_topics:
-                to_match = None
-                try:
-                    to_match = [i for i in candidates if i[-1] == p[0]][0]
-                    to_match = [to_match, p]
-                except:
-                    pass
-
-                try:
-                    to_match = [i for i in candidates if i[0] == p[-1]][0]
-                    to_match = [p, to_match]
-                except:
-                    pass
-                if to_match and to_match not in detected_paths and not check_abstract(to_match):
-                    detected_paths.append(to_match)
         
-        if training_mode:
-            return [p for p in detected_paths if len(p) > 1]
+        # supplementary: non-question centric grouping
+        non_topics = [p[0] for p in non_topics if p[0] not in visited]
+        candidates = [t for t in all_triplets if set(t) & set(q_entities)]
+        for p in non_topics:
+            match = next(
+                (
+                    [c, p] if c[-1] == p[0] else [p, c]
+                    for c in candidates
+                    if c[-1] == p[0] or c[0] == p[-1]
+                ),
+                None
+            )
+            if match and frozenset(extract_(match)) not in detected_pairs and not check_abstract(match):
+                detected_paths.append(match)
+                detected_pairs.add(frozenset(extract_(match)))
         
-        detected_paths = [post_process_(p) for p in detected_paths]
         # multi-answer
         for p in detected_paths:
             p_ = list(chain.from_iterable(p))
@@ -352,43 +333,72 @@ class RLRE(nn.Module):
         detected_paths = []
 
         for k,v in logic2path.items():
+            if len(v) == 1:
+                v = next(iter(v))
             p = k + (v,) if k[0] in q_entities else (v,) + k
             p = [p[i:i+3] for i in range(0, len(p), 3)]
             detected_paths.append(p)
         
         # multi-entity
-        detected_paths = merging_(detected_paths, q_entities)
+        if len(detected_paths) > 1 and len(q_entities) > 1:
+            detected_paths = merging_(detected_paths, q_entities)
+        
         # 30 or 40 both are fine.
-        if self.llms.data_name == 'cwq':
-            detected_paths = [i for i in detected_paths if len(i) > 1][:30] + [i for i in detected_paths if len(i) == 1]
+        # if self.llms.data_name == 'cwq':
+        #     detected_paths = [i for i in detected_paths if len(i) > 1][:30] + [i for i in detected_paths if len(i) == 1]
 
-        detected_triplets = [item for path in detected_paths for item in path]
-        detected_triplets = post_processing(detected_triplets)
-        detected_triplets = [str(item).replace("'", "") for item in detected_triplets]
-
+        # detected_triplets = [item for path in detected_paths for item in path]
+        # detected_triplets = post_processing(detected_triplets)
+        # detected_triplets = [str(item).replace("'", "") for item in detected_triplets]
+        detected_triplets = [triples_to_string(p) for p in detected_paths]
         if not detected_paths:
             detected_paths = [[]]
 
-        detected_triplets = remove_duplicates(detected_triplets)
+        # detected_triplets = remove_duplicates(detected_triplets)
         return detected_triplets, detected_paths
 
-def post_processing(triples):
+def triples_to_string(triples):
+    result = triples[0][0]
+    result = result if type(result) is str else " | ".join(result)
+    for i, (s, p, o) in enumerate(triples):
+        o = o if type(o) is str else " | ".join(o)
+        if i < len(triples) - 1 and o.startswith(('m.', 'g.')):
+            continue
+        result += f" > [{p}] > {o}"
+    return result.replace("'", "")
 
-    def chunk_set(s, size):
-        s = list(s)
-        return [set(s[i:i+size]) for i in range(0, len(s), size)]
-
+def post_processing(all_paths):
     expanded_triples = []
-    for h, rel, t in triples:
-        if isinstance(h, set):
-            for chunk in chunk_set(h, 5):
-                expanded_triples.append((chunk, rel, t))
-        elif isinstance(t, set):
-            for chunk in chunk_set(t, 5):
-                expanded_triples.append((h, rel, chunk))
+    for triples in all_paths:
+        #[(), ()]
+        triples = [i for t in triples for i in t]
+        if isinstance(triples[0], set):
+            for chunk in get_chunk_set(triples[0], 5):
+                expanded_triples.append([chunk] + triples[1:])
+        elif isinstance(triples[-1], set):
+            for chunk in get_chunk_set(triples[-1], 5):
+                expanded_triples.append(triples[:-1] + [chunk])
         else:
-            expanded_triples.append((h, rel, t))
-    return expanded_triples
+            expanded_triples.append(triples)
+    return [[tuple(p[i:i+3]) for i in range(0, len(p), 3)] for p in expanded_triples]
+
+# def post_processing(triples):
+
+#     def chunk_set(s, size):
+#         s = list(s)
+#         return [set(s[i:i+size]) for i in range(0, len(s), size)]
+
+#     expanded_triples = []
+#     for h, rel, t in triples:
+#         if isinstance(h, set):
+#             for chunk in chunk_set(h, 5):
+#                 expanded_triples.append((chunk, rel, t))
+#         elif isinstance(t, set):
+#             for chunk in chunk_set(t, 5):
+#                 expanded_triples.append((h, rel, chunk))
+#         else:
+#             expanded_triples.append((h, rel, t))
+#     return expanded_triples
 
 
 def score(lst, all_triplets, logits):
@@ -407,29 +417,53 @@ def remove_duplicates(input_list):
             seen.add(item)
     return result
 
-def post_process_(seg):
-    if len(seg) == 2 and seg[0][-1].startswith(('m.', 'g.')):
-        seg = [(seg[0][0], seg[1][1], seg[1][-1])]
-    return seg
+# def remove_duplicates_(org_triplets):
+#     seen = set()
+#     result = []
+#     for triple in org_triplets:
+#         ent = frozenset((triple[0], triple[-1]))
+#         if ent not in seen:
+#             seen.add(ent)
+#             result.append(triple)
+#     return result
+
+# def aggregates(all_triplets):
+#     forward_all, backward_all = defaultdict(set), defaultdict(set)
+#     results = []
+#     for triple in all_triplets:
+#         forward, backward = triple[:-1], triple[1:]
+#         if forward in forward_all:
+#             forward_all[forward].add(triple[-1])
+#         elif backward in backward_all:
+#             backward_all[backward].add(triple[0])
+#         else:
+#             forward_all[forward].add(triple[-1])
+#             backward_all[backward].add(triple[0])
+    
+#     for (kf,vf), (kb,vb) in zip(forward_all.items(), backward_all.items()):
+#         if len(vf) > 1:
+#             results.append(kf + (vf,))
+#         elif len(vb) > 1:
+#             results.append((vb,) + kb)
+#         else:
+#             results.append(kf + (next(iter(vf)),))
+#     return results
+
 
 def merging_(lst_, q_entities):
     """
     return: visited (used to merge), merged
     """
-    # budget = {'scattered': scatter_budget, 'merged': merge_budget}
-    # count = {'scattered': 0, 'merged': 0}
     visited, intersects, lst = [], [], deepcopy(lst_)
 
     def extract_(t):
-        return (t[0][0], t[-1][-1]) if (t[0][0] in q_entities) else (t[-1][-1], t[0][0])
-
-    if len(q_entities) == 1 or len(lst) == 1:
-        return lst_
+        start, end = (t[0][0], t[-1][-1]) if (t[0][0] in q_entities) else (t[-1][-1], t[0][0])
+        if not isinstance(end, set):
+            end = {end}
+        return start, deepcopy(end)
 
     for i, motif in enumerate(lst[:-1]):
-        topic, targets = extract_(motif)
-        final_targets = deepcopy(targets)
-        # final_topics = [topic]
+        topic, final_targets = extract_(motif)
         if motif in visited:
             continue
         for j in range(i+1, len(lst)):

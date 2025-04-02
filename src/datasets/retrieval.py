@@ -269,7 +269,7 @@ class RetrievalDatasetWithoutEmb(RetrievalDataset):
             shortest_paths = shortest_paths_cache.get(sample['id'], [])
             shortest_paths = self.refine_shortest(sample, shortest_paths, all_triplets)
             shortest_paths_processed_cache[sample['id']] = shortest_paths
-            
+
             processed_sample = {
                 "id": sample['id'],
                 "q": sample["question"],
@@ -277,7 +277,7 @@ class RetrievalDatasetWithoutEmb(RetrievalDataset):
                 "triplets": all_triplets,
                 "relevant_paths": shortest_paths,
             }
-            if len(shortest_paths) <= 1 or max(len(path) for path in shortest_paths) == 0 or sample["a_entity"] == ['null']:
+            if sample['num_edge'] == 1 or not shortest_paths or sample["a_entity"] == ['null']:
                 continue
             processed_data.append(processed_sample)
         
@@ -292,7 +292,7 @@ class RetrievalDatasetWithoutEmb(RetrievalDataset):
         h_id_list, r_id_list, t_id_list = sample["h_id_list"], sample["r_id_list"], sample["t_id_list"]
         all_triplets = [(all_entities[h], all_relations[r], all_entities[t]) for (h, r, t) in zip(h_id_list, r_id_list, t_id_list)]
         return all_triplets
-            
+   
 
 def path2set(path):
     return {itm for triple in path for itm in triple}
