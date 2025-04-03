@@ -284,9 +284,6 @@ class RLRE(nn.Module):
         
         non_topics, with_topics = [[itm] for itm in non_topics], [[itm] for itm in with_topics]
         with_topics_queue = deque(with_topics)
-        # from src.datasets import remove_dup_directions
-        # # : remove abundant directions in topic
-        # detected_paths = remove_dup_directions(with_topics, q_entities)
         
         # multi-hop: BFS-based triplet expansion
         # question-centric grouping
@@ -323,7 +320,6 @@ class RLRE(nn.Module):
             if match and frozenset(extract_(match)) not in detected_pairs and not check_abstract(match):
                 detected_paths.append(match)
                 detected_pairs.add(frozenset(extract_(match)))
-        
         # multi-answer
         for p in detected_paths:
             p_ = list(chain.from_iterable(p))
@@ -364,7 +360,7 @@ def triples_to_string(triples):
         o = o if type(o) is str else " | ".join(o)
         if i < len(triples) - 1 and o.startswith(('m.', 'g.')):
             continue
-        result += f" > [{p}] > {o}"
+        result += f" → [{p}] → {o}"
     return result.replace("'", "")
 
 def post_processing(all_paths):
@@ -421,7 +417,7 @@ def remove_duplicates(input_list):
 #     seen = set()
 #     result = []
 #     for triple in org_triplets:
-#         ent = frozenset((triple[0], triple[-1]))
+#         ent = frozenset((triple[0][0], triple[-1][-1]))
 #         if ent not in seen:
 #             seen.add(ent)
 #             result.append(triple)
