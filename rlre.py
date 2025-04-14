@@ -58,11 +58,13 @@ class RLRE(nn.Module):
             "F1": [],
             "precision": [],
             "recall": [],
+            "hit": []
         }
         for g,q,a,d in zip(g_batch, q_batch, a_batch, id_batch):
-            (f1, prec, recall), (matched, not_prec, missing) = self.reward_metrics.calc_r(g,a,q)
+            (f1, prec, recall), hit, (matched, not_prec, missing) = self.reward_metrics.calc_r(g,a,q)
             self.evaluation[d].update({
                 "F1": f1,
+                "hit": hit,
                 "precision": prec,
                 "recall": recall,
                 "gen": g,
@@ -73,6 +75,7 @@ class RLRE(nn.Module):
             reward_batch["F1"].append(f1)
             reward_batch["precision"].append(prec)
             reward_batch["recall"].append(recall)
+            reward_batch["hit"].append(hit)
         return reward_batch   
     
     def cal_loss_multi_cat(self, attn_logits, scores):
@@ -296,6 +299,8 @@ class RLRE(nn.Module):
             if len(seg) == max_len:
                 continue
             for b in non_topics:
+                if dc(b[0][1]):
+                    continue
                 motif = to_match(seg, b)
                 if motif and frozenset(extract_(motif)) not in detected_pairs:
                     with_topics_queue.append(motif)
@@ -324,6 +329,9 @@ class RLRE(nn.Module):
         for p in detected_paths:
             p_ = list(chain.from_iterable(p))
             logics, target = (p_[:-1], {p_[-1]}) if p_[0] in q_entities else (p_[1:], {p_[0]})
+            for i in range(1, len(logics) - 1):
+                if logics[i].startswith(('m.', 'g.')):
+                    logics[i] = 'ABS-Identifier'
             logic2path[tuple(logics)].update(target)
 
         detected_paths = []
@@ -332,7 +340,7 @@ class RLRE(nn.Module):
             if len(v) == 1:
                 v = next(iter(v))
             p = k + (v,) if k[0] in q_entities else (v,) + k
-            p = [p[i:i+3] for i in range(0, len(p), 3)]
+            p = [list(p[i:i+3]) for i in range(0, len(p), 3)]
             detected_paths.append(p)
         
         # multi-entity
@@ -346,19 +354,22 @@ class RLRE(nn.Module):
         # detected_triplets = [item for path in detected_paths for item in path]
         # detected_triplets = post_processing(detected_triplets)
         # detected_triplets = [str(item).replace("'", "") for item in detected_triplets]
-        detected_triplets = [triples_to_string(p) for p in detected_paths]
+        detected_triplets = [paths_to_string(p) for p in detected_paths]
         if not detected_paths:
             detected_paths = [[]]
 
-        # detected_triplets = remove_duplicates(detected_triplets)
+        detected_triplets = remove_duplicates(detected_triplets)
         return detected_triplets, detected_paths
 
-def triples_to_string(triples):
+def dc(text):
+    return text.startswith(('common.', 'freebase.', 'type.'))
+
+def paths_to_string(triples):
     result = triples[0][0]
     result = result if type(result) is str else " | ".join(result)
     for i, (s, p, o) in enumerate(triples):
         o = o if type(o) is str else " | ".join(o)
-        if i < len(triples) - 1 and o.startswith(('m.', 'g.')):
+        if i < len(triples) - 1 and o == 'ABS-Identifier':
             continue
         result += f" → [{p}] → {o}"
     return result.replace("'", "")
