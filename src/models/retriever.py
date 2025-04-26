@@ -9,11 +9,7 @@ from src.models.dde import DDE
 from src.models.gnn import PNA
 
 class Retriever(nn.Module):
-    def __init__(
-        self,
-        config,
-        **kwargs
-    ):
+    def __init__(self, config, **kwargs):
         super().__init__()
         emb_size = config['hidden_size']
         self.model_type = config['model_type']
@@ -28,8 +24,9 @@ class Retriever(nn.Module):
                 pred_in_size += 2 * 2
             pred_in_size += 2 * 2 * (model_kwargs['num_rounds'] + model_kwargs['num_reverse_rounds'])
         elif self.model_type == "PNA":
+            model_kwargs['deg'] = kwargs.get("deg")
             self.PNA = PNA(**model_kwargs)
-            pred_in_size += 2 * emb_size
+            pred_in_size = 2 * emb_size + 2
         else:
             raise NotImplementedError
         
@@ -87,3 +84,32 @@ class Retriever(nn.Module):
                 trainable_params += num_params
 
         return trainable_params, all_param
+
+class BaselineRetriever(Retriever):
+    def __init__(self, config, **kwargs):
+        super().__init__(config, **kwargs)
+    
+    def forward(self, graph, q_emb,):
+        device = self.device
+        x, edge_index, edge_attr, topic_entity_one_hot = graph.x, graph.edge_index, graph.edge_attr, graph.topic_signal
+        # assert edge_index.max() < x.size(0), f"edge_index max {edge_index.max()} >= x.size(0) {x.size(0)}"
+        # assert edge_index.min() >= 0, f"edge_index has negative value: {edge_index.min()}"
+        # if edge_index.numel() == 0:
+        #     print("Warning: empty edge_index")
+
+        x[(x==0).all(dim=1)] = self.non_text_entity_emb(torch.LongTensor([0]).to(device))
+
+        h_e_list = [topic_entity_one_hot]
+
+        if self.model_type == 'PNA':
+            ent_rprs = self.PNA(x, edge_attr, edge_index)
+        h_e_list.extend(ent_rprs)
+        h_e = torch.cat(h_e_list, dim=1)
+
+        h_triple = torch.cat([
+            q_emb,
+            h_e,
+        ], dim=1)
+        # get the score of each entity. triple score = head score + tail score.
+        return self.pred(h_triple).squeeze()
+    

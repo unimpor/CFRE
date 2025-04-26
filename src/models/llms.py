@@ -11,7 +11,8 @@ import torch.nn as nn
 from src.utils.prompts import *
 from src.utils import print_log, triplet_to_str
 # 215e0f164f9f445ea2aaa64db2e1c135
-API_KEY = "aca3450b38024f6786313b557f4b99dd"
+API_KEY = "26c54bfbe3dd4ce6b01089c362b7fe9a"
+# 26c54bfbe3dd4ce6b01089c362b7fe9a
 # "aca3450b38024f6786313b557f4b99dd"
 # API_KEY="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"
 MAX_RETRIES = 5
@@ -26,26 +27,19 @@ class LLMs(nn.Module):
         self.inf_level = config['level']
         self.async_version = kwargs.get("async_version", True)
         # prompt config
-        print(self.inf_level)
+        print(self.model_name)
         self.cot_prompt = None
-        if self.inf_level == "path":
-            self.system_prompt = SYS_PROMPT
-            self.icl_prompt = [(ICL_USER_PROMPT, ICL_ASS_PROMPT)]
-        elif self.inf_level == "triplet":
-            self.system_prompt = SYS_PROMPT_triple
-            self.icl_prompt = [(ICL_USER_PROMPT_triple, ICL_ASS_PROMPT_triple)]     
-
-        # if self.model_name == "meta-llama/Meta-Llama-3.1-8B-Instruct":
-        #     client = LLM(model=self.model_name, 
-        #                  tensor_parallel_size=config["tensor_parallel_size"], 
-        #                  max_seq_len_to_capture=config["max_seq_len_to_capture"],
-        #                  gpu_memory_utilization=config["gpu_memory_utilization"],
-        #                  )
-        #     sampling_params = SamplingParams(temperature=config["temperature"], 
-        #                                     max_tokens=config["max_tokens"],
-        #                                     frequency_penalty=config["frequency_penalty"])
-        #     self.llm = partial(client.chat, sampling_params=sampling_params, use_tqdm=False)
+        # if self.inf_level == "path":
+        #     self.system_prompt = SYS_PROMPT
+        #     self.icl_prompt = [(ICL_USER_PROMPT, ICL_ASS_PROMPT)]
+        # elif self.inf_level == "triplet":
+        self.system_prompt = SYS_PROMPT_EVIDENCE
+        self.icl_prompt = [(ICL_USER_PROMPT_triple_Apr, ICL_ASS_PROMPT_triple_Apr)]
         
+        if self.model_name in ['Qwen/QwQ-32B', 'deepseek/deepseek-r1']:
+            self.system_prompt = SYS_PROMPT_EVIDENCE_QWQ
+            self.icl_prompt = [(ICL_USER_PROMPT_triple_QWQ, ICL_ASS_PROMPT_triple_QWQ)]     
+            
         client_class = AsyncOpenAI if self.async_version else OpenAI
         
         client = client_class(
@@ -59,7 +53,7 @@ class LLMs(nn.Module):
                             model=self.model_name, 
                             seed=config["seed"], 
                             temperature=config["temperature"], 
-                            max_tokens=1000)
+                            max_tokens=3000)
     
     def initialize_prompt_template(self, ):
         if not self.fast_thinking:
@@ -82,24 +76,11 @@ class LLMs(nn.Module):
         """
         Generation conversation given a query-triplet pair.
         """
-        if not triplets_or_paths or type(triplets_or_paths[0]) is str:
+        # if not triplets_or_paths or type(triplets_or_paths[0]) is str:
             # triplet level prompt
-            triplet_prompt = "Triplets:\n" + "\n".join(triplets_or_paths)
-        elif type(triplets_or_paths[0]) is list:
-            # path level prompt
-            formatted_paths = []
-            for i, path in enumerate(triplets_or_paths):
-                if len(path) == 1:
-                    break
-                formatted_path = f"Path {i}. "
-                formatted_path += ', '.join([str(triplet) for triplet in path])
-                formatted_paths.append(formatted_path)
-            triplets_or_paths = [str(item[0]) for item in triplets_or_paths if len(item) == 1]
-            if len(triplets_or_paths) > 0:
-                triplet_prompt = "Paths:\n" + "\n".join(formatted_paths) + '\n\n' + "Scattered Triplets:\n" + "\n".join(triplets_or_paths)
-            else:
-                triplet_prompt = "Paths:\n" + "\n".join(formatted_paths)
-        
+        triplets_or_paths = [f'Chain {i+1}. ' + triple for i, triple in enumerate(triplets_or_paths)]
+        triplet_prompt = "Evidence Chains:\n" + "\n".join(triplets_or_paths)
+
         question_prompt = "Question:\n" + query
         if question_prompt[-1] != '?':
             question_prompt += '?'
@@ -112,7 +93,10 @@ class LLMs(nn.Module):
 
     def pack_prompt(self, user_query):
         conversation = []
-        # if self.model_name == "deepseek/deepseek-r1":
+        # if self.model_name in ['Qwen/QwQ-32B']:
+        #     for item in self.icl_prompt:
+        #         conversation.append({"role": "user", "content": item[0]})
+        #         conversation.append({"role": "assistant", "content": item[1]})
         #     conversation.append({"role": "user", "content": self.system_prompt + '\n\n' + user_query})
         #     return conversation
         
@@ -200,10 +184,10 @@ class LLMs(nn.Module):
 class LLMs_Ret_Paths(LLMs):
     def __init__(self, config, **kwargs):
         super().__init__(config, **kwargs)
-        self.system_prompt = SYS_PROMPT_PATH
+        self.system_prompt = SYS_PROMPT_PATH_grailqa
         self.icl_prompt = [
                             # (ICL_USER_PROMPT_PATH_0, ICL_ASS_PROMPT_PATH_0),
-                            (ICL_USER_PROMPT_PATH, ICL_ASS_PROMPT_PATH),
+                            (ICL_USER_PROMPT_PATH_grailqa, ICL_ASS_PROMPT_PATH_grailqa),
                             ]
 
         self.level = "path"
@@ -236,8 +220,9 @@ class LLMs_Ret_Paths(LLMs):
         response_batch = [self.llm_inf(messages=messages) for messages in messages_batch]
 
         for d, response, triplets_or_paths, q in zip(id_batch, response_batch, path_batch, query_batch):
-            print_log(d, logging)
+            print_log(str(d), logging)
             print_log(q, logging)
+            print_log(triplet_or_path_prompt, logging)
             print_log(response, logging)
             print_log('\n', logging)
             # score_list = get_score(response, len(triplets_or_paths))
@@ -253,76 +238,6 @@ class LLMs_Ret_Paths(LLMs):
             # sign_batch.append(sign)
         # return scores_batch
         return identified_batch
-
-
-        
-class LLMs_Ret_Triplets(LLMs):
-    def __init__(self, config):
-        super().__init__(config)
-        self.system_prompt = SYS_PROMPT_TRI
-        self.icl_prompt = (ICL_USER_PROMPT_TRI, ICL_ASS_PROMPT_TRI)
-        self.level = "triplet"
-    
-    def oracle_detection(self, query, answer, triplets_or_paths, all_triplets):
-        all_triplets_ = path2triple(triplets_or_paths)
-        formatted_triplets = [f"Triplet{i}.\n" + str(triplet) for i, triplet in enumerate(all_triplets_)]
-        
-        triplet_prompt = "Triplets:\n" + "\n".join(formatted_triplets)
-        question_prompt = "Question:\n" + query
-        answer_prompt = "Answer(s):\n" + ", ".join(answer)
-        if question_prompt[-1] != '?':
-            question_prompt += '?'
-
-        user_query = "\n\n".join([triplet_prompt, question_prompt, answer_prompt])
-        response = self.llm_inf(messages=self.pack_prompt(user_query))
-
-        print_log(user_query + "\n" + response, save_path=f"fig/webqsp_label_{self.level}.txt")
-        identified = get_pred(response)
-        print(identified)
-        try:
-            identified = [all_triplets_[i] for i in identified]
-        except IndexError as e:
-            identified = []
-        print(identified)
-        selected_triplets = [all_triplets.index(triplet) for triplet in identified]
-        return selected_triplets
-
-
-class LLMs_Ret_Relations(LLMs):
-    def __init__(self, config):
-        super().__init__(config)
-        self.system_prompt = SYS_PROMPT_R
-        self.icl_prompt = (ICL_USER_PROMPT_R, ICL_ASS_PROMPT_R)
-        if self.data_name == "webqsp":
-            self.icl_prompt = (ICL_USER_PROMPT_R_W, ICL_ASS_PROMPT_R_W)
-        self.level = "relation"
-    
-    def oracle_detection(self, query, answer, triplets_or_paths, all_triplets):
-        # all_relations = path2relation(triplets_or_paths)
-        all_relations = triplets_or_paths
-        formatted_relations = [f"Relation{i}.\n" + r for i, r in enumerate(all_relations)]
-        
-        triplet_or_path_prompt = "Relations:\n" + "\n".join(formatted_relations)
-        
-        question_prompt = "Question:\n" + query
-        if question_prompt[-1] != '?':
-            question_prompt += '?'
-
-        user_query = "\n\n".join([triplet_or_path_prompt, question_prompt])
-        response = self.llm_inf(messages=self.pack_prompt(user_query))
-
-        print_log(user_query + "\n" + response, save_path=f"fig/{self.data_name}_iter2_label_{self.level}_.txt")
-
-        identified = get_pred(response)
-        try:
-            identified = [all_relations[i] for i in identified]
-        except IndexError as e:
-            identified = []
-
-        # selected_triplets = [triplet for triplet in path2triple(triplets_or_paths) if triplet[1] in identified]
-        # selected_triplets = [all_triplets.index(triplet) for triplet in selected_triplets]
-        # return selected_triplets 
-        return identified     
 
 
 def remove_duplicates(input_list):
