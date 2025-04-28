@@ -23,7 +23,7 @@ class RetrievalDataset:
         self.config = config
         self.root = config['root']
         self.data_name = config['name']
-
+        self.mode = config['mode']
         self.short_path = kwargs.get('spath', opj(self.root, self.data_name, "processed", "shortest_path.pth"))
         self.oracle_path = kwargs.get("opath", opj(self.root, self.data_name, "processed", "refined_path.pth"))
 
@@ -47,7 +47,7 @@ class RetrievalDataset:
         for sample in raw_data:
             sample_id = sample['id']
             sample_embd = embs.get(sample_id, None)
-            if not sample_embd or sample["a_entity"] == ['null']:
+            if not sample_embd or sample.get("a_entity", []) == ['null']:
                 continue
             
             oracle_paths =  oracle_paths_cache.get(sample_id, []) if self.training else []
@@ -75,16 +75,20 @@ class RetrievalDataset:
                                       torch.tensor(t_id_list)], axis=0)
             edge_attr = sample_embd['relation_embs'][r_id_list]
 
-            def path2tid(all_t, all_p):
-                return remove_duplicates([all_t.index(item) for path in all_p for item in path])
+            def path2tid(all_paths):
+                if self.data_name in ['grailqa', 'graphq']:
+                    selected_ = [(item[0], item[-1]) for path in all_paths for item in path]
+                    path_idx = [i for i,t in enumerate(all_triplets) if (t[0], t[-1]) in selected_ or (t[-1], t[0]) in selected_]
+                else:
+                    path_idx = [all_triplets.index(item) for path in all_paths for item in path]
+                return remove_duplicates(path_idx)
             
-            shortest_path_idx = path2tid(all_triplets, shortest_paths)
-            # oracle_path_idx = path2tid(all_triplets, oracle_paths)
+            shortest_path_idx = path2tid(shortest_paths)
+            oracle_path_idx = path2tid(oracle_paths)
 
-            # bidir
-            selected_ = [(item[0], item[-1]) for path in oracle_paths for item in path]
-            oracle_path_idx = [i for i,t in enumerate(all_triplets) if (t[0], t[-1]) in selected_ or (t[-1], t[0]) in selected_]
-            oracle_path_idx = remove_duplicates(oracle_path_idx)
+            if self.mode == 'gnn_rag':
+                oracle_entity_idx = [all_entities.index(all_triplets[i][0]) for i in oracle_path_idx] + [all_entities.index(all_triplets[i][-1]) for i in oracle_path_idx] 
+                oracle_path_idx = remove_duplicates(oracle_entity_idx)
 
             if self.training and len(oracle_path_idx) == 0:
                 continue
@@ -95,6 +99,7 @@ class RetrievalDataset:
                 "q_embd": sample_embd['q_emb'],
                 "a_entity": [all_entities[idx] for idx in sample["a_entity_id_list"]],
                 "q_entity": [all_entities[idx] for idx in sample["q_entity_id_list"] if all_entities[idx] not in NOISES],
+                "entities": all_entities,
                 "triplets": all_triplets,
                 "relevant_idx": oracle_path_idx,
                 "shortest_path_idx": shortest_path_idx,
@@ -115,7 +120,7 @@ class RetrievalDataset:
             raise NotImplemented
 
     def _load_emb(self, ):
-        if self.data_name == 'grailqa':
+        if self.data_name in ['grailqa', 'graphq']:
             return torch.load(f"/home/comp/cscxliu/derek/LTRoG/data_files/retriever/{self.data_name}/emb/gte-large-en-v1.5/{self.split}.pth")
 
         full_dict = dict()
