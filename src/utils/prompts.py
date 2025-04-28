@@ -7,7 +7,6 @@ Path 0. (Caribbean, location.location.contains, Netherlands Antilles), (Netherla
 Path 1. (Spanish Language, language.human_language.countries_spoken_in, Barbados), (Barbados, location.location.containedby, Caribbean)
 
 Triplets:
-(Cura�ao, location.country.official_language, Dutch Language)
 (Anguilla, location.location.containedby, Caribbean)
 (English Language, language.human_language.countries_spoken_in, Bahamas)
 (Barbados, location.country.languages_spoken, English Language)
@@ -49,13 +48,125 @@ Question:
 What country does Japan export to that contains the Phoenix Islands?
 
 
-Hints:
-Japan
-Phoenix Islands
 """
 
 ICL_ASS_PROMPT_3_brief = """ans: Kiribati
 """
+
+
+ICL_USER_PROMPT_triple = """Triplets:
+(Lou Seal,sports.mascot.team,San Francisco Giants)
+(San Francisco Giants,sports.sports_team.championships,{2012 World Series, 2014 World Series, 2010 World Series})
+(San Francisco Giants,sports.sports_championship_event.champion,2014 World Series)
+(San Francisco Giants,time.participant.event,2014 Major League Baseball season)
+(San Francisco Giants,time.participant.event,2010 World Series)
+(San Francisco Giants,time.participant.event,2010 Major League Baseball season)
+(San Francisco Giants,sports.sports_team.team_mascot,Crazy Crab)
+(San Francisco Giants,sports.professional_sports_team.owner_s,Bill Neukom)
+(San Francisco Giants,time.participant.event,2012 World Series)
+(San Francisco,sports.sports_team_location.teams,San Francisco Giants)
+(San Francisco Giants,sports.sports_team.arena_stadium,AT&T Park)
+(AT&T Park,location.location.events,2012 World Series)
+(m.011zsc4_,organization.leadership.organization,San Francisco Giants)
+(San Francisco Giants,sports.sports_team.previously_known_as,New York Giants)
+
+
+Question:
+What year did the team with mascot named Lou Seal win the World Series?"""
+
+
+ICL_ASS_PROMPT_triple = """To find the year the team with mascot named Lou Seal won the World Series, we need to find the team with mascot named Lou Seal and then find the year they won the World Series.
+
+From the triplets, we can see that Lou Seal is the mascot of the San Francisco Giants.
+
+Now, we need to find the year the San Francisco Giants won the World Series.
+
+From the triplets, we can see that San Francisco Giants won the 2010 World Series and 2012 World Series and 2014 World Series.
+
+So, the team with mascot named Lou Seal (San Francisco Giants) won the World Series in 2010, 2012, and 2014.
+
+Therefore, the formatted answers are:
+
+ans: 2014 World Series
+ans: 2012 World Series
+ans: 2010 World Series"""
+
+
+ICL_USER_PROMPT_triple_Apr = """Evidence Chains:
+Chain 1. Lou Seal → [sports.mascot.team] → San Francisco Giants → [sports.sports_team.championships] → {(1) 2012 World Series (2) 2014 World Series (3) 2010 World Series}
+Chain 2. San Francisco Giants → [sports.sports_championship_event.champion] → {(1) 2014 World Series}
+Chain 3. San Francisco Giants → [time.participant.event] → {(1) 2014 Major League Baseball season}
+Chain 4. San Francisco Giants → [time.participant.event] → {(1) 2010 World Series}
+Chain 5. San Francisco Giants → [sports.sports_team.team_mascot] → {(1) Crazy Crab}
+Chain 6. San Francisco Giants → [sports.professional_sports_team.owner_s] → {(1) Bill Neukom}
+Chain 7. San Francisco Giants → [time.participant.event] → {(1) 2012 World Series}
+Chain 8. San Francisco → [sports.sports_team_location.teams] → {(1) San Francisco Giants}
+Chain 9. San Francisco Giants → [sports.sports_team.arena_stadium] → {(1) AT&T Park}
+Chain 10. AT&T Park → [location.location.events] → {(1) 2012 World Series}
+
+
+Question:
+What year did the team with mascot named Lou Seal win the World Series?"""
+
+
+ICL_ASS_PROMPT_triple_Apr = """To find the year the team with mascot named Lou Seal won the World Series, we need to find the team with mascot named Lou Seal and then find the year they won the World Series.
+
+From Chain 1, we can see that Lou Seal is the mascot of the San Francisco Giants, and that San Francisco Giants won the 2010, 2012, and 2014 World Series.
+
+Therefore, the formatted answers are:
+
+ans: 2014 World Series
+ans: 2012 World Series
+ans: 2010 World Series"""
+
+
+ICL_USER_PROMPT_triple_webqsp = """Evidence Chains:
+Chain 1. Atlanta → [travel.travel_destination.tourist_attractions] → {(1) Georgia State Capitol (2) Georgia World Congress Center (3) Four Seasons Hotel Atlanta (4) Atlanta Jewish Film Festival (5) Margaret Mitchell House & Museum (6) Martin Luther King, Jr. National Historic Site (7) Georgia Dome (8) Woodruff Arts Center (9) Six Flags White Water}
+Chain 2. Atlanta → [travel.travel_destination.tourist_attractions] → {(1) Omni Coliseum (2) Masquerade (3) Arbor Place Mall (4) Turner Field (5) Atlanta History Center (6) Atlanta Ballet (7) Jimmy Carter Library and Museum (8) Variety Playhouse (9) Philips Arena (10) Zoo Atlanta}
+Chain 3. Atlanta → [sports.sports_team_location.teams] → {(1) Chain Lightning (2) Georgia Tech Yellow Jackets football (3) Atlanta Thrashers (4) Atlanta Falcons}
+Chain 4. Atlanta → [location.adjoining_relationship.adjoins] → {(1) Duluth}
+Chain 5. Atlanta → [travel.transportation.transport_operator] → {(1) Amtrak (2) Greyhound Lines}
+Chain 6. Atlanta → [travel.transportation.mode_of_transportation] → {(1) Air travel (2) Bus (3) Train}
+
+
+Question:
+what to do today in atlanta with kids?"""
+
+
+ICL_ASS_PROMPT_triple_webqsp = """To find activities to do today in Atlanta with kids, we can look at the tourist attractions and activities suitable for families.
+
+From Chain 1 and Chain 2, we see several attractions that are family-friendly. Therefore, we extract and list all answer entities from Chain 1 (1)–(9) and Chain 2 (1)–(10) as the formatted answers.
+
+ans: Georgia State Capitol
+ans: Georgia World Congress Center
+ans: Four Seasons Hotel Atlanta
+ans: Atlanta Jewish Film Festival
+ans: Margaret Mitchell House & Museum
+ans: Martin Luther King, Jr. National Historic Site
+ans: Georgia Dome
+ans: Woodruff Arts Center
+ans: Six Flags White Water
+ans: Omni Coliseum
+ans: Masquerade
+ans: Arbor Place Mall
+ans: Turner Field
+ans: Atlanta History Center
+ans: Atlanta Ballet
+ans: Jimmy Carter Library and Museum
+ans: Variety Playhouse
+ans: Philips Arena
+ans: Zoo Atlanta"""
+
+
+
+
+
+
+
+
+
+
+
 
 ICL_USER_PROMPT_path_level_inf = """Paths:
 0. ('The Baltimore Fight Song', 'sports.fight_song.sports_team', 'Baltimore Ravens'), ('Baltimore Ravens', 'sports.sports_team.championships', 'Super Bowl XLVII')
@@ -106,18 +217,15 @@ ans: Kiribati
 """
 
 
-ICL_USER_PROMPT = """Triplets:
-(Lou Seal,sports.mascot.team,San Francisco Giants)
-(San Francisco Giants,sports.sports_team.championships,2012 World Series)
+ICL_USER_PROMPT = """Paths:
+Path 0. (Lou Seal,sports.mascot.team,San Francisco Giants), (San Francisco Giants,sports.sports_team.championships,{2012 World Series, 2014 World Series, 2010 World Series})
+
+
+Scattered Triplets:
 (San Francisco Giants,sports.sports_championship_event.champion,2014 World Series)
-(San Francisco Giants,time.participant.event,2014 Major League Baseball season)
-(San Francisco Giants,time.participant.event,2010 World Series)
-(San Francisco Giants,time.participant.event,2010 Major League Baseball season)
-(San Francisco Giants,sports.sports_team.championships,2014 World Series)
+(San Francisco Giants,time.participant.event,{2014 Major League Baseball season, 2010 World Series, 2010 Major League Baseball season, 2012 World Series})
 (San Francisco Giants,sports.sports_team.team_mascot,Crazy Crab)
-(San Francisco Giants,sports.sports_team.championships,2010 World Series)
 (San Francisco Giants,sports.professional_sports_team.owner_s,Bill Neukom)
-(San Francisco Giants,time.participant.event,2012 World Series)
 (San Francisco,sports.sports_team_location.teams,San Francisco Giants)
 (San Francisco Giants,sports.sports_team.arena_stadium,AT&T Park)
 (AT&T Park,location.location.events,2012 World Series)
@@ -127,10 +235,6 @@ ICL_USER_PROMPT = """Triplets:
 
 Question:
 What year did the team with mascot named Lou Seal win the World Series?
-
-
-Hints:
-Lou Seal
 """
 
 ICL_ASS_PROMPT_brief = """ans: 2014 (2014 World Series)
@@ -140,11 +244,7 @@ ans: 2010 (2010 World Series)
 
 ICL_ASS_PROMPT = """To find the year the team with mascot named Lou Seal won the World Series, we need to find the team with mascot named Lou Seal and then find the year they won the World Series.
 
-From the triplets, we can see that Lou Seal is the mascot of the San Francisco Giants.
-
-Now, we need to find the year the San Francisco Giants won the World Series.
-
-From the triplets, we can see that San Francisco Giants won the 2010 World Series and 2012 World Series and 2014 World Series.
+From path 0, we can see that Lou Seal is the mascot of the San Francisco Giants, and San Francisco Giants won the 2010 World Series and 2012 World Series and 2014 World Series.
 
 So, the team with mascot named Lou Seal (San Francisco Giants) won the World Series in 2010, 2012, and 2014.
 
@@ -155,19 +255,128 @@ ans: 2012 (2012 World Series)
 ans: 2010 (2010 World Series)"""
 
 SYS_PROMPT = (
-    "Given reasoning paths and triplets retrieved from a knowledge graph, please answer the question."
-   #  " Each triplet consists of two entities connected by a relation, and each path is a sequence of triplets forming a reasoning chain that may or may not contribute to an answer."
-   #  " In addition to paths, there are scattered triplets that provide supplementary information, though a single triplet alone may be insufficient to fully answer the question."
-   #  " You will be provided with hints containing a list of entities extracted from the question. When answering the question, prioritize considering paths or triplets that explicitly mention these entities."
-   #  " Each triplet consists of two entities connected by a relation, and each path is a sequence of triplets forming a multi-hop reasoning chain."
-   #  " Only a subset of the given information is relevant for answering the question."
+    "Given the reasoning paths and additional scattered triplets retrieved from a knowledge graph, please answer the question."
+    " If a triplet contains curly braces {}, it means the relation applies to multiple entities."
+    " For example, the triplet (James K. Polk, people.person.profession, {Lawyer, Politician, Farmer}) shows that James K. Polk has multiple professions: Lawyer, Politician, and Farmer."
     ' Please return formatted answers, each on a new line and prefixed with "ans:".'
 )
 
-# SYS_PROMPT = (
-#     "Based on the triplets retrieved from a knowledge graph, please answer the question."
-#     ' Please return formatted answers, each on a new line and prefixed with "ans:".'
+SYS_PROMPT_triple = (
+    "Based on the triplets retrieved from a knowledge graph, please answer the question."
+    " If a triplet contains curly braces {}, it means the relation applies to multiple entities."
+    " For example, the triplet (James K. Polk, people.person.profession, {Lawyer, Politician, Farmer}) shows that James K. Polk has multiple professions: Lawyer, Politician, and Farmer."
+    ' Please return formatted answers, each on a new line and prefixed with "ans:".'
+)
+
+# SYS_PROMPT_triple_Apr = (
+#     "Answer the question using evidence chains retrieved from a knowledge graph. Each evidence line follows this structure:\n"
+#     "   - Entities and relations are connected by - symbols\n"
+#     "   - Relations are enclosed in square brackets []\n"
+#     "   - Multiple entities for the same relation are separated by |\n"
+#     "For example, the evidence James K. Polk - [people.person.profession] - Lawyer | Politician | Farmer shows that James K. Polk has multiple professions: Lawyer, Politician, and Farmer."
+#     "Please return formatted answers, each on a new line and prefixed with 'ans:'."
 # )
+
+SYS_PROMPT_EVIDENCE = (
+    "Answer the question using evidence chains from a knowledge graph, where each evidence line represents a continuous, directional logical path flowing from left to right. "
+    # "Each chain yields one or more target entities, which are either at the beginning or end of the chain, enclosed in '{}' and numbered from (1) to (N). "
+
+    "For example, the evidence 'James K. Polk → [people.person.profession] → {(1) Lawyer (2) Politician}' shows that James K. Polk has multiple professions: Lawyer and Politician. "
+
+    # "When identifying a chain critical for answering the query, extract all target entities listed inside '{ }' — from (1) to (N) — without missing any. "
+    "Please return formatted answers, each on a new line and prefixed with 'ans:'."
+)
+
+SYS_PROMPT_EVIDENCE_QWQ = (
+    "You are an analytical assistant that answers questions using provided knowledge graph evidence chains. Each line is a directed logical path, but only a small subset is relevant to any given question. "
+    "For example, the evidence 'James K. Polk - [people.person.profession] - Lawyer | Politician | Farmer' shows that James K. Polk has multiple professions: Lawyer, Politician, and Farmer.\n"
+    
+    "When answering questions, follow this concise two-step reasoning process:\n\n"
+    "1. **Question Analysis**\n"
+    "   - Identify the key entities, properties, and relationships needed to answer the question.\n"
+    "2. **Evidence Selection and Answer Derivation**\n"
+    "   - QUICKLY Scan the provided evidence chains and select **only** the line(s) whose logic is directly relevant to the question. Ignore unrelated evidence.\n"
+    "   - Derive the answer(s) based on the selected chain(s).\n"
+
+    "**Note:**\n"
+    "   - The questions are generally straightforward and do not require complex reasoning.\n"
+    "   - Avoid 1) overthinking the question wording or interpreting it in a complicated or nuanced way; 2) giving detailed explanations for each chain.\n"
+    "   - Keep your thinking process **brief, direct, and focused**—stay within 1000 tokens. \n\n"
+
+    "After completing the reasoning, return formatted answers, each on a new line and prefixed with 'ans:'."
+)
+
+# Don't overthink the question wording. The questions are generally straightforward and direct. Focus on extracting the correct answer based on relevant evidence, rather than interpreting the question in a complicated or nuanced way. Avoid over-analyzing the phrasing.
+# "   - Some later evidence lines may repeat the same information already presented earlier. You can safely ignore these without additional analysis.\n"
+
+
+# SYS_PROMPT_EVIDENCE_QWQ = (
+#     "You are an analytical assistant that answers questions using provided knowledge graph evidence chains, where each evidence line represents a directed logical path. "
+#     "For example, the evidence 'James K. Polk - [people.person.profession] - Lawyer | Politician | Farmer' shows that James K. Polk has multiple professions: Lawyer, Politician, and Farmer.\n"
+#     "When answering questions, follow this two-step reasoning process with a note:\n"
+#     "1. Question Analysis: Identify key entities, properties, and relationships needed to answer the question.\n"
+#     "2. Evidence Selection and Answer Derivation: Scan all the provided evidence chains and identify ONLY the line number whose logic is directly relevant to the question. Ignore irrelevant lines. Derive the answers using the identified chains.\n"
+#     "**Note**: The questions are generally straightforward. Keep your reasoning short (less than 3000 tokens) and to the point — no need for lengthy explanations for each chain line.\n\n"
+#     "After completing the reasoning, return formatted answers, each on a new line and prefixed with 'ans:'."
+#     # "3. ANSWER FORMATION: Format the final answer based on the identified evidence. Each answer must start with 'ans:' on a new line.\n"
+# )
+
+# SYS_PROMPT_EVIDENCE_QWQ = (
+#     "You are an analytical assistant that answers questions using provided knowledge graph evidence chains, where each evidence line represents a directed logical path."
+#     "Required Workflow:\n"
+#     "(1). QUESTION ANALYSIS: Identify key entities and relationships needed to answer the question.\n"
+#     "(2). EVIDENCE SELECTION: Quickly scan the evidence chains and identify the line numbers directly relevant to the query demand. Ignore irrelevant lines. Then derive answers based on identified evidence.\n"
+#     "(3). ANSWER FORMATION: Return formatted answers, each on a new line and prefixed with 'ans:'.\n"
+#     "Follow (1) and (2) to generate a concise reasoning process between <think> and </think>. Follow (3) to generate final sanwers."
+# )
+
+ICL_USER_PROMPT_triple_QWQ = """Evidence Chains:
+Chain 1. Watt per square metre per steradian - [measurement_unit.radiance_unit.measurement_system] - International System of Units
+Chain 2. Watt per square metre per steradian - [measurement_unit.radiance_unit.measurement_system] - International System of Units - [measurement_unit.measurement_system.weight_units] - Gram | Kilogram | Tonne | Milligram | Microgram
+Chain 3. Watt per square metre per steradian - [measurement_unit.radiance_unit.measurement_system] - International System of Units - [measurement_unit.measurement_system.data_rate_units] - Kilobit per second | Gigabit per second | Megabit per second | bit per second | Terabit per second
+Chain 4. Watt per square metre per steradian - [measurement_unit.radiance_unit.measurement_system] - International System of Units - [measurement_unit.measurement_system.length_units] - Decametre | Micrometer | Decimetre | Millimeter | Kilometer | centimeters | Megametre | Picometre | Nanometre | Meter | Hectometre
+Chain 5. Watt per square metre per steradian - [measurement_unit.radiance_unit.measurement_system] - International System of Units - [measurement_unit.measurement_system.radioactivity_units] - becquerels
+
+
+Question:
+watt per square metre per steradian is used in what unit of length?
+"""
+
+ICL_ASS_PROMPT_triple_QWQ = """<think>
+Okay, let's tackle this question: "watt per square metre per steradian is used in what unit of length?" The main subject here is "Watt per square metre per steradian," which is a radiance unit in the International System of Units (SI). The question is asking about a unit of length connected to this.
+Looking through the evidence lines, only Chain 4 shows the units of length associated with "watt per square metre per steradian" are: Decametre, Micrometer, Decimetre, etc. Therefore, I will present all length units referenced in Chain 4 as the answer.
+</think>
+
+ans: Decametre
+ans: Micrometer
+ans: Decimetre
+ans: Millimeter
+ans: Kilometer
+ans: centimeters
+ans: Megametre
+ans: Picometre
+ans: Nanometre
+ans: Meter
+ans: Hectometre
+"""
+
+# ICL_ASS_PROMPT_triple_QWQ = """<think>
+# Okay, let's tackle this question: "watt per square metre per steradian is used in what unit of length?" 
+# QUESTION ANALYSIS: The main subject here is "Watt per square metre per steradian," which is a radiance unit in the International System of Units (SI). The question is asking about length units connected to this.
+# EVIDENCE SELECTION: After examining all evidence lines, only Chain 4 shows that the units of length associated with "watt per square metre per steradian" are: Decametre, Micrometer, Decimetre, etc. Therefore, I will present all length units referenced in Chain 4 as the answer.
+
+# ans: Decametre
+# ans: Micrometer
+# ans: Decimetre
+# ans: Millimeter
+# ans: Kilometer
+# ans: centimeters
+# ans: Megametre
+# ans: Picometre
+# ans: Nanometre
+# ans: Meter
+# ans: Hectometre
+# """
 
 # SYS_PROMPT = (
 #     " Based solely on the provided triplets from the knowledge graph, please answer the question."
@@ -244,28 +453,56 @@ SYS_PROMPT_PATH_old1 = (
    # " If all entities and relationships are covered, append 'sign: STOP' to your answer. If any key entity or relationship is still missing, append 'sign: CONTINUE' to your answer."
 )
 
-SYS_PROMPT_PATH = (
+SYS_PROMPT_PATH_grailqa = """Given a question, an answer, and reasoning paths (each representing a directed chain of entities connected by semantic relations), select paths based on these criteria:
 
-   "You are provided with a question, its answer(s), and several reasoning paths. Each path represents a logical sequence of steps that leads to an answer."
+1. Relevance: 
+   - Relations in the selected path lexically match or semantically align with certain question keywords
 
-   " Your task is to evaluate each path individually and assign it a score based on its relevance to answering the question, according to the following criteria:"
-   
-   "\nScore = 1: If the path covers all the key entities and relationships mentioned in the question and provides sufficient information to fully answer the question."
-   
-   "\nScore = 0: If the path covers some of the key entities or relationships from the question and provides useful information that can help justify or validate the final answer, even if it doesn't fully answer the question."
-   
-   "\nScore = -1: If the path does not cover any key entities or relationships, or does not contribute any meaningful information to answering the question."
+2. Exclusivity:
+   - Reject paths that:
+     * Contain only peripheral information
+     * Include irrelevant details
+     * Demonstrate logical inconsistencies with question requirements
 
-   "\nFor example, for the question 'What country speaks Arabic in the Central Time Zone?' and its answer 'Canada', the path ('Canada', 'location.location.time_zones', 'Central Time Zone') should be marked as 0,"
-   " because this path cannot fully answer the question, but it captures the key entity 'Central Time Zone' and helps validate the answer by confirming the Canada is in the Central Time Zone."
-   
-   " For the question 'Which college includes Newt Gincrich as an alumni?' and its answer 'Tulane University', the path ('Tulane University', 'common.topic.notable_types', 'College/University') should be marked as -1,"
-   " because this path does not provide any meaningful information for the question."
+Return all selected paths prefixed with 'ans:', one per line. If none apply, return 'No valid paths found'.
+"""
 
-   "\nFor each path, return its score in the format 'Path X: score' (e.g., 'Path 0: 1')."
-   # TODO: brief version
-   # "\nProvide a brief explanation for each path, justifying the assigned score."
-   )
+# ('Foveon X3 sensor', 'digicams.camera_color_filter_array_type.cameras', 'Sigma SD1'), ('Sigma SD1', 'digicams.digital_camera.supported_storage_types', 'CompactFlash')
+# Foveon X3 sensor -> [digicams.camera_color_filter_array_type.cameras] -> Sigma SD1 -> [digicams.digital_camera.supported_storage_types] -> CompactFlash
+# 
+
+# in webqsp
+# SYS_PROMPT_PATH = (
+#     "You are provided with a question, its answer(s), and several reasoning paths."
+#     " While all paths may arrive at a certain answer, some may use reasoning that deviates from the context and logic presented in the question."
+#     " Your task is to carefully evaluate each path and select only those that strictly adhere to the question's context and logical framework."
+#     " Filter out any paths that rely on irrelevant information or reasoning inconsistent with the question's requirements."
+#     " After evaluation, return only the selected paths that meet the criteria, each on a new line and prefixed with 'ans:', such as 'ans: Path 0'."
+#     " If no paths meet the criteria, return 'No valid paths found'."
+# )
+
+# SYS_PROMPT_PATH = (
+
+#    "You are provided with a question, its answer(s), and several reasoning paths. Each path represents a logical sequence of steps that leads to an answer."
+
+#    " Your task is to evaluate each path individually and assign it a score based on its relevance to answering the question, according to the following criteria:"
+   
+#    "\nScore = 1: If the path covers all the key entities and relationships mentioned in the question and provides sufficient information to fully answer the question."
+   
+#    "\nScore = 0: If the path covers some of the key entities or relationships from the question and provides useful information that can help justify or validate the final answer, even if it doesn't fully answer the question."
+   
+#    "\nScore = -1: If the path does not cover any key entities or relationships, or does not contribute any meaningful information to answering the question."
+
+#    "\nFor example, for the question 'What country speaks Arabic in the Central Time Zone?' and its answer 'Canada', the path ('Canada', 'location.location.time_zones', 'Central Time Zone') should be marked as 0,"
+#    " because this path cannot fully answer the question, but it captures the key entity 'Central Time Zone' and helps validate the answer by confirming the Canada is in the Central Time Zone."
+   
+#    " For the question 'Which college includes Newt Gincrich as an alumni?' and its answer 'Tulane University', the path ('Tulane University', 'common.topic.notable_types', 'College/University') should be marked as -1,"
+#    " because this path does not provide any meaningful information for the question."
+
+#    "\nFor each path, return its score in the format 'Path X: score' (e.g., 'Path 0: 1')."
+#    # TODO: brief version
+#    # "\nProvide a brief explanation for each path, justifying the assigned score."
+#    )
 
 # deprecated.
 # SYS_PROMPT_PATH_STRICT = (
@@ -368,35 +605,86 @@ ICL_ASS_PROMPT_PATH_3_brief = """Path 0: 0
 Path 1: -1
 """
 
-ICL_USER_PROMPT_PATH_W = """Paths:
-Path0.
-('Justin Bieber', 'people.person.parents', 'Jeremy Bieber'), ('Jeremy Bieber', 'people.person.children', 'Jaxon Bieber')
-Path1.
-('Justin Bieber', 'people.person.sibling_s', 'm.0gxnnwp'), ('m.0gxnnwp', 'people.sibling_relationship.sibling', 'Jaxon Bieber')
-Path2.
-('Jaxon Bieber', 'people.person.sibling_s', 'm.0gxnnwp'), ('m.0gxnnwp', 'people.sibling_relationship.sibling', 'Justin Bieber')
-Path3.
-('Jaxon Bieber', 'people.person.parents', 'Jeremy Bieber'), ('Jeremy Bieber', 'people.person.children', 'Justin Bieber')
+ICL_USER_PROMPT_PATH = """Paths:
+Path 0. 
+('United States of America', 'location.location.partially_contains', 'American Falls'), ('American Falls', 'location.location.partially_containedby', 'Canada')
+Path 1. 
+('Mexico', 'location.country.form_of_government', 'Federal republic'), ('Federal republic', 'government.form_of_government.countries', 'United States of America')
+Path 2. 
+('United States of America', 'sports.sport_country.multi_event_tournaments_participated_in', '2012 World Mountain Running Championships'), ('2012 World Mountain Running Championships', 'sports.multi_event_tournament.participating_countries', 'Mexico')
 
 
 Question:
-what is the name of justin bieber brother?
+which countries border the us?
 
 
 Answer(s):
-Jaxon Bieber
+Mexico
+Canada
 """
 
-ICL_ASS_PROMPT_PATH_W = """The correct answer is Jaxon Bieber. To identify the relevant reasoning paths, we need to focus on relationships that establish Jaxon Bieber as Justin Bieber's brother.
+ICL_ASS_PROMPT_PATH = """The correct answer is Canada and Mexico. To identify the relevant reasoning paths, we need to focus on relationships that establish geographical borders with the United States. 
 
-Path0 involves Justin Bieber's father, Jeremy Bieber, and his children (including Jaxon Bieber), which directly establishes the family relationship.
+Path 0 involves the shared location of American Falls, which connects the United States and Canada through a geographical relationship. This path is valid as it adheres to the question's logical framework and context.
 
-Path3 also connects Jaxon Bieber and Justin Bieber through their shared parent, Jeremy Bieber, which confirms that they are siblings.
+Path 1 links Mexico and the US via government form, which is irrelevant to the question's focus on geographical borders. 
+
+Path 2 connects Mexico and the US through a sports event, also irrelevant.
+
+Therefore, the relevant paths are: 
+
+ans: Path 0
+"""
+
+
+ICL_USER_PROMPT_PATH_grailqa = """Paths:
+Path 0. 
+[('boeing company', 'spaceflight.rocket_manufacturer.rockets_manufactured', 'saturn v rocket'), ('saturn v rocket', 'spaceflight.rocket.manufacturer', 'North American Aviation')]
+Path 1. 
+[('boeing company', 'business.business_operation.industry', 'Aerospace'), ('Aerospace', 'business.industry.companies', 'North American Aviation')]
+Path 2. 
+[('Little Joe', 'spaceflight.rocket.manufacturer', 'North American Aviation')]
+Path 3.
+[('North American Aviation', 'aviation.aircraft_manufacturer.aircraft_models_made', 'North American XB-70A')]
+Path 4.
+[('saturn v rocket', 'spaceflight.rocket.height_meters', '110.6')]
+Path 5.
+[('saturn v rocket', 'spaceflight.rocket.country_of_origin', 'United States of America')]
+Path 6.
+[('saturn v rocket', 'spaceflight.rocket.mass', '3038500.0')]
+Path 7.
+[('Aerospace', 'business.industry.companies', 'North American Aviation')]
+
+
+Question:
+What rocket manufacturer produced Little Joe and also collaborated with Boeing on making a rocket with mass over 2.916e+06?
+
+
+Answer(s):
+North American Aviation
+"""
+
+ICL_ASS_PROMPT_PATH_grailqa = """To identify the relevant reasoning paths, we need to focus on relationships that:
+
+1) Confirm the manufacturer produced Little Joe, 2) Show collaboration with Boeing on a rocket, and 3) Provide information about the rocket mass.
+
+Path 0 is valid because it establishes collaboration with Boeing (via Saturn V) and confirms North American Aviation as the manufacturer.
+
+Path 2 is valid because it directly proves North American Aviation produced Little Joe.
+
+Path 6 is valid because it provides information about the rocket mass (3,038,500 - 2.916e+06).
+
+For irrelevant paths, Path 1/7 link Boeing and North American Aviation via Aerospace, which is indirect (no collaboration on making a rocket).
+
+Path 3 discusses aircraft models, which is irrelevant to rockets.
+
+Path 4/5 Describe background info of Saturn V (irrelevant to its mass).
 
 Therefore, the relevant paths are:
 
 ans: Path 0
-ans: Path 3
+ans: Path 2
+ans: Path 6
 """
 
 
