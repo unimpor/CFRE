@@ -23,6 +23,19 @@ def set_seed(seed):
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True
 
+def get_chunk_set(s, size):
+    final = []
+    s = list(s) if isinstance(s, set) else [s]
+    for i in range(0, len(s), size):
+        res_str = "{"
+        targets = s[i:i+size]
+        for i, itm in enumerate(targets):
+            res_str += f"({i+1}) {itm}"
+            if i < len(targets)-1:
+                res_str += " "
+        final.append(res_str + "}")
+    return final
+    # return [" | ".join(set(s[i:i+size])) for i in range(0, len(s), size)]
 
 def adjust_learning_rate(param_group, LR, epoch, args):
     """Decay the learning rate with half-cycle cosine after warmup"""
