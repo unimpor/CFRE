@@ -78,7 +78,7 @@ class LLMs(nn.Module):
         """
         # if not triplets_or_paths or type(triplets_or_paths[0]) is str:
             # triplet level prompt
-        triplets_or_paths = [f'Chain {i+1}. ' + triple for i, triple in enumerate(triplets_or_paths)]
+        triplets_or_paths = [f'Chain {i+1}.\n' + triple for i, triple in enumerate(triplets_or_paths)]
         triplet_prompt = "Evidence Chains:\n" + "\n".join(triplets_or_paths)
 
         question_prompt = "Question:\n" + query

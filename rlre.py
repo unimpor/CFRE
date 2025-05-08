@@ -242,8 +242,7 @@ class RLRE(nn.Module):
         #     select_idx = [k for k in select_idx if k != to_del]
 
         with_topics, non_topics, detected_paths, logic2path, visited, detected_pairs  = [], [], [], defaultdict(set), [], set()
-        for idx in select_idx:
-            triple = all_triplets[idx]
+        for triple in select_triples:
             if triple[0] in q_entities or triple[-1] in q_entities:
                 with_topics.append(triple)
             else:
@@ -269,6 +268,10 @@ class RLRE(nn.Module):
                 if motif and frozenset(extract_(motif)) not in detected_pairs:
                     with_topics_queue.append(motif)
                     detected_pairs.add(frozenset(extract_(motif)))
+
+        if self.mode == 'gnn_rag' and self.dataset == 'cwq':
+            from src.datasets import remove_dup_directions
+            detected_paths = remove_dup_directions(detected_paths, q_entities)
 
         detected_paths = sorted(detected_paths, 
                                 key=lambda lst: score(lst, all_triplets, logits), 

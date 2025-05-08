@@ -93,16 +93,22 @@ ans: 2010 World Series"""
 
 
 ICL_USER_PROMPT_triple_Apr = """Evidence Chains:
-Chain 1. Lou Seal → [sports.mascot.team] → San Francisco Giants → [sports.sports_team.championships] → {(1) 2012 World Series (2) 2014 World Series (3) 2010 World Series}
-Chain 2. San Francisco Giants → [sports.sports_championship_event.champion] → {(1) 2014 World Series}
-Chain 3. San Francisco Giants → [time.participant.event] → {(1) 2014 Major League Baseball season}
-Chain 4. San Francisco Giants → [time.participant.event] → {(1) 2010 World Series}
-Chain 5. San Francisco Giants → [sports.sports_team.team_mascot] → {(1) Crazy Crab}
-Chain 6. San Francisco Giants → [sports.professional_sports_team.owner_s] → {(1) Bill Neukom}
-Chain 7. San Francisco Giants → [time.participant.event] → {(1) 2012 World Series}
-Chain 8. San Francisco → [sports.sports_team_location.teams] → {(1) San Francisco Giants}
-Chain 9. San Francisco Giants → [sports.sports_team.arena_stadium] → {(1) AT&T Park}
-Chain 10. AT&T Park → [location.location.events] → {(1) 2012 World Series}
+Chain 1.
+Lou Seal → [sports.mascot.team] → San Francisco Giants → [sports.sports_team.championships; time.participant.event] → 2012 World Series; 2014 World Series; 2010 World Series
+Chain 2.
+San Francisco Giants → [sports.sports_championship_event.champion] → 2014 World Series
+Chain 3.
+San Francisco Giants → [time.participant.event] → 2014 Major League Baseball season
+Chain 4.
+San Francisco Giants → [sports.sports_team.team_mascot] → Crazy Crab
+Chain 5.
+San Francisco Giants → [sports.professional_sports_team.owner_s] → Bill Neukom
+Chain 6.
+San Francisco → [sports.sports_team_location.teams] → San Francisco Giants
+Chain 7.
+San Francisco Giants → [sports.sports_team.arena_stadium] → AT&T Park
+Chain 8.
+AT&T Park → [location.location.events] → 2012 World Series
 
 
 Question:
@@ -121,12 +127,18 @@ ans: 2010 World Series"""
 
 
 ICL_USER_PROMPT_triple_webqsp = """Evidence Chains:
-Chain 1. Atlanta → [travel.travel_destination.tourist_attractions] → {(1) Georgia State Capitol (2) Georgia World Congress Center (3) Four Seasons Hotel Atlanta (4) Atlanta Jewish Film Festival (5) Margaret Mitchell House & Museum (6) Martin Luther King, Jr. National Historic Site (7) Georgia Dome (8) Woodruff Arts Center (9) Six Flags White Water}
-Chain 2. Atlanta → [travel.travel_destination.tourist_attractions] → {(1) Omni Coliseum (2) Masquerade (3) Arbor Place Mall (4) Turner Field (5) Atlanta History Center (6) Atlanta Ballet (7) Jimmy Carter Library and Museum (8) Variety Playhouse (9) Philips Arena (10) Zoo Atlanta}
-Chain 3. Atlanta → [sports.sports_team_location.teams] → {(1) Chain Lightning (2) Georgia Tech Yellow Jackets football (3) Atlanta Thrashers (4) Atlanta Falcons}
-Chain 4. Atlanta → [location.adjoining_relationship.adjoins] → {(1) Duluth}
-Chain 5. Atlanta → [travel.transportation.transport_operator] → {(1) Amtrak (2) Greyhound Lines}
-Chain 6. Atlanta → [travel.transportation.mode_of_transportation] → {(1) Air travel (2) Bus (3) Train}
+Chain 1.
+Atlanta → [travel.travel_destination.tourist_attractions] → CNN Center; Atlanta History Center; Philips Arena; Cobb Energy Performing Arts Centre; Woodruff Arts Center; Turner Field; World of Coca-Cola; Atlanta Marriott Marquis; Atlanta Ballet; Atlanta Cyclorama & Civil War Museum
+Chain 2.
+Atlanta → [travel.travel_destination.tourist_attractions] → Fox Theatre; Georgia World Congress Center; Variety Playhouse; Georgia Aquarium; Arbor Place Mall; Centennial Olympic Park; Omni Coliseum; Hyatt Regency Atlanta; Six Flags White Water; Zoo Atlanta
+Chain 3.
+Atlanta → [travel.travel_destination.tourist_attractions] → Atlanta Symphony Orchestra; Jimmy Carter Library and Museum; Six Flags Over Georgia; Margaret Mitchell House & Museum; Peachtree Road Race; Martin Luther King, Jr. National Historic Site; Georgia Dome; Four Seasons Hotel Atlanta; Masquerade; Georgia State Capitol
+Chain 4.
+Atlanta → [travel.travel_destination.tourist_attractions] → Atlanta Jewish Film Festival; Underground Atlanta; The Tabernacle; Center for Puppetry Arts; Fernbank Museum of Natural History; Fernbank Science Center
+Chain 5.
+Atlanta → [travel.transportation.transport_operator] → Amtrak; Greyhound Lines
+Chain 6.
+Atlanta → [travel.transportation.mode_of_transportation] → Air travel; Bus; Train
 
 
 Question:
@@ -287,6 +299,11 @@ SYS_PROMPT_EVIDENCE = (
     "Please return formatted answers, each on a new line and prefixed with 'ans:'."
 )
 
+SYS_PROMPT_LRMs = (
+    "Answer the question using evidence chains from a knowledge graph. "
+    "Return formatted answers, each on a new line and prefixed with 'ans:'."
+)
+
 SYS_PROMPT_EVIDENCE_QWQ = (
     "You are an analytical assistant that answers questions using provided knowledge graph evidence chains. Each line is a directed logical path, but only a small subset is relevant to any given question. "
     "For example, the evidence 'James K. Polk - [people.person.profession] - Lawyer | Politician | Farmer' shows that James K. Polk has multiple professions: Lawyer, Politician, and Farmer.\n"
@@ -331,15 +348,32 @@ SYS_PROMPT_EVIDENCE_QWQ = (
 # )
 
 ICL_USER_PROMPT_triple_QWQ = """Evidence Chains:
-Chain 1. Watt per square metre per steradian - [measurement_unit.radiance_unit.measurement_system] - International System of Units
-Chain 2. Watt per square metre per steradian - [measurement_unit.radiance_unit.measurement_system] - International System of Units - [measurement_unit.measurement_system.weight_units] - Gram | Kilogram | Tonne | Milligram | Microgram
-Chain 3. Watt per square metre per steradian - [measurement_unit.radiance_unit.measurement_system] - International System of Units - [measurement_unit.measurement_system.data_rate_units] - Kilobit per second | Gigabit per second | Megabit per second | bit per second | Terabit per second
-Chain 4. Watt per square metre per steradian - [measurement_unit.radiance_unit.measurement_system] - International System of Units - [measurement_unit.measurement_system.length_units] - Decametre | Micrometer | Decimetre | Millimeter | Kilometer | centimeters | Megametre | Picometre | Nanometre | Meter | Hectometre
-Chain 5. Watt per square metre per steradian - [measurement_unit.radiance_unit.measurement_system] - International System of Units - [measurement_unit.measurement_system.radioactivity_units] - becquerels
+Chain 1.
+Watt per square metre per steradian → [measurement_unit.radiance_unit.measurement_system] → International System of Units
+Chain 2.
+Watt per square metre per steradian → [measurement_unit.radiance_unit.measurement_system] → International System of Units → [measurement_unit.measurement_system.weight_units] → Gram; Kilogram; Tonne; Milligram; Microgram
+Chain 3.
+Watt per square metre per steradian → [measurement_unit.radiance_unit.measurement_system] → International System of Units → [measurement_unit.measurement_system.data_rate_units] → Kilobit per second; Gigabit per second; Megabit per second; bit per second; Terabit per second
+Chain 4.
+Watt per square metre per steradian → [measurement_unit.radiance_unit.measurement_system] → International System of Units → [measurement_unit.measurement_system.length_units] → Decametre; Micrometer; Decimetre; Millimeter; Kilometer; centimeters; Megametre; Picometre; Nanometre; Meter; Hectometre
+Chain 5.
+Watt per square metre per steradian → [measurement_unit.radiance_unit.measurement_system] → International System of Units → [measurement_unit.measurement_system.radioactivity_units] → becquerels
 
 
 Question:
-watt per square metre per steradian is used in what unit of length?
+watt per square metre per steradian is used in what unit of length?"""
+
+ICL_ASS_PROMPT_triple_QWQ_brief = """ans: Decametre
+ans: Micrometer
+ans: Decimetre
+ans: Millimeter
+ans: Kilometer
+ans: centimeters
+ans: Megametre
+ans: Picometre
+ans: Nanometre
+ans: Meter
+ans: Hectometre
 """
 
 ICL_ASS_PROMPT_triple_QWQ = """<think>
